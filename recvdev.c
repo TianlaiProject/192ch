@@ -29,9 +29,9 @@
 #define N_BASELINE ((MAX_PACKET_ID - 1)*MAX_PACKET_SIZE + MIN_PACKET_SIZE - 88) / 8 // 4 bytes real and 4 bytes imag
 #define N_FREQUENCY (1008 - 42)
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
-#define buflen 8 * N_BASELINE * FREQUENCY * N_INTEGRA_TIME // Bytes
+#define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
-#define N_TIME_PER_FILE N_INTERGER_TIME * N_BUFFER_PER_FILE
+#define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 //#define recvbuflen MAX_PACKET_ID*MAX_RAWPACKET_SIZE*FREQUENCY
 
 //#define buf_packet_MAX  MAX_PACKET_ID *FREQUENCY*N_INTEGRA_TIME
@@ -51,7 +51,12 @@ FILE *fp; // Log file pointer.
 //FILE *fp_data; // Data file pointer.
 hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* Handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
-hsize_t sub_dims[3] = {N_INTEGER_TIME, N_FREQUENCY, N_BASELINE};
+hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
+hsize_t count[3] = {0, 0, 0}; /* size of subset in the file */
+hsize_t offset[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE}; /* subset offset in the file */
+hsize_t stride[3] = {1, 1, 1}; /* subset stride in the file */
+hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
+
 int buf_cnt = 0;
 //---int fp_data_count=0;
 //int expected_packet_id = 0 ;          //packet id
@@ -128,7 +133,7 @@ void gen_datafile()
     herr_t status;
 
     // Create a new hdf5 file using the default properties.
-    file_id = H5Fcreate (FILE, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    file_id = H5Fcreate (data_path0, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     // Create the compound datatype for memory.
     memtype = H5Tcreate (H5T_COMPOUND, sizeof (complex_t));
     status = H5Tinsert (memtype, "r", HOFFSET(complex_t, r), H5T_NATIVE_FLOAT);
@@ -140,33 +145,32 @@ void gen_datafile()
     // Create dataspace.  Setting maximum size to NULL sets the maximum size to be the current size.
     dataspace_id = H5Screate_simple (3, dims, NULL);
     // Create the dataset to write the compound data to it later.
-    dataset_id = H5Dcreate (file_id, 'vis', filetype, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    dataset_id = H5Dcreate (file_id, "vis", filetype, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
     file_count++;
 }
 
 void writeData()
 {
+    complex_t * cbuf;
+    herr_t      status;
+    hid_t       sub_dataspace_id;
+    //hsize_t     count[3] = {buf_cnt*N_INTEGRA_TIME, 0, 0};              /* size of subset in the file */
+
     gen_datafile();
     int buf_init_iter;
     while (1)
     {
         if( buf01_state == 1 )
         {
-            herr_t      status;
-            hid_t       sub_dataspace_id;
-            hsize_t     count[3] = {buf_cnt*N_INTEGRA_TIME, 0, 0};              /* size of subset in the file */
-            hsize_t     offset[3] = {N_INTEGER_TIME, N_FREQUNCY, N_BASELINE};             /* subset offset in the file */
-            hsize_t     stride[3] = {1, 1, 1};
-            hsize_t     block[3] = {1, 1, 1};
-
+            count[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
             // Select subset from file dataspace.
             status = H5Sselect_hyperslab (dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
             // Write a subset of data to the dataset.
-            complex_t *cbuf01 = buf01
-            status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf01);
+            cbuf = (complex_t *)buf01;
+            status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 // Close and release resources.
@@ -176,31 +180,29 @@ void writeData()
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
 
+                buf_cnt = 0;
                 gen_datafile();
+            }
+            else
+            {
+                buf_cnt++;
             }
 
             // re-initialize the buffer
             for (buf_init_iter=0; buf_init_iter<buflen; buf_init_iter++)
                 buf01[buf_init_iter] = 0xFF;
             buf01_state = 0;
-            buf_cnt++
         }
         else if( buf02_state == 1 )
         {
-            herr_t      status;
-            hid_t       sub_dataspace_id;
-            hsize_t     count[3] = {buf_cnt*N_INTEGRA_TIME, 0, 0};              /* size of subset in the file */
-            hsize_t     offset[3] = {N_INTEGER_TIME, N_FREQUNCY, N_BASELINE};             /* subset offset in the file */
-            hsize_t     stride[3] = {1, 1, 1};
-            hsize_t     block[3] = {1, 1, 1};
-
+            count[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
             // Select subset from file dataspace.
             status = H5Sselect_hyperslab (dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
             // Write a subset of data to the dataset.
-            complex_t *cbuf02 = buf02
-            status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf02);
+            cbuf = (complex_t *)buf02;
+            status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 // Close and release resources.
@@ -210,17 +212,30 @@ void writeData()
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
 
+                buf_cnt = 0;
                 gen_datafile();
+            }
+            else
+            {
+                buf_cnt++;
             }
 
             // re-initialize the buffer
             for (buf_init_iter=0; buf_init_iter<buflen; buf_init_iter++)
                 buf02[buf_init_iter] = 0xFF;
             buf02_state = 0;
-            buf_cnt++
         }
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
+        {
+            // Close and release resources.
+            status = H5Dclose (dataset_id);
+            status = H5Sclose (dataspace_id);
+            status = H5Tclose (memtype);
+            status = H5Tclose (filetype);
+            status = H5Fclose (file_id);
+
             break;
+        }
     }
 }
 
@@ -562,16 +577,17 @@ void recvData()
     char log_path0[150];
     register int row = 0;
     register int pkt_id, pkt_id_old=-1;
-    register int row_in_buf = FREQUENCY * N_INTEGRA_TIME;
-    register long row_size = ((MAX_PACKET_ID - 1) * MAX_PACKET_SIZE + MIN_PACKET_SIZE) - 88;
+    register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    register long row_size = 8 * N_BASELINE;
 
-    strcpy(log_path0,filepath);
-    strcat(log_path0,"datadev0.log");
-    fp= fopen(log_path0,"wb");
+    strcpy(log_path0, filepath);
+    strcat(log_path0, "datadev0.log");
+    fp= fopen(log_path0, "wb");
 
     u_char frame_buff[BUFSIZE];
     u_char * frame_buff_p = frame_buff;
-    u_char * start_buf_p, start_frame_p;
+    u_char * start_buf_p;
+    u_char * start_frame_p;
     int copy_len;
 
     int recv_fd;
@@ -759,11 +775,11 @@ int main(int argc, char* argv[])
     {
         thread_id = omp_get_thread_num();
         if(thread_id == 0)
-        recvData();
+            recvData();
         //else if(thread_id == 1)
         //    checkData();
         else if(thread_id == 1)
-        writeData();
+            writeData();
     }
 
     free(buf01);
@@ -775,3 +791,4 @@ int main(int argc, char* argv[])
     fflush(stdout);
     return 0;
 }
+
