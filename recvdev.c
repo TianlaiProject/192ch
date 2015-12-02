@@ -52,8 +52,8 @@ FILE *fp; // Log file pointer.
 hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* Handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
 hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
-hsize_t count[3] = {0, 0, 0}; /* size of subset in the file */
-hsize_t offset[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE}; /* subset offset in the file */
+hsize_t offset[3] = {0, 0, 0}; /* subset offset in the file */
+hsize_t count[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE}; /* size of subset in the file */
 hsize_t stride[3] = {1, 1, 1}; /* subset stride in the file */
 hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 
@@ -163,7 +163,7 @@ void writeData()
     {
         if( buf01_state == 1 )
         {
-            count[0] = buf_cnt*N_INTEGRA_TIME;
+            offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
             // Select subset from file dataspace.
@@ -195,7 +195,7 @@ void writeData()
         }
         else if( buf02_state == 1 )
         {
-            count[0] = buf_cnt*N_INTEGRA_TIME;
+            offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
             // Select subset from file dataspace.
@@ -613,7 +613,7 @@ void recvData()
     {
         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
         //        if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-        if ((int)frame_buff[18] == 0)
+        if ((int)frame_buff[18] == 0 && (int)frame_buff[26] == 42)
         {
             pkt_id = 0;
             break;
@@ -791,4 +791,3 @@ int main(int argc, char* argv[])
     fflush(stdout);
     return 0;
 }
-
