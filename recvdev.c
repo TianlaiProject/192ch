@@ -27,7 +27,7 @@
 #define MIN_RAWPACKET_SIZE 1022
 
 #define N_BASELINE ((MAX_PACKET_ID - 1)*MAX_PACKET_SIZE + MIN_PACKET_SIZE - 88) / 8 // 4 bytes real and 4 bytes imag
-#define N_FREQUENCY (1008 - 42)
+#define N_FREQUENCY 1008 //(1008 - 42)
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
@@ -576,7 +576,7 @@ void recvData()
     register int packet_len ;
     char log_path0[150];
     register int row = 0;
-    register int pkt_id, pkt_id_old=-1;
+    register int init_cnt, current_cnt, freq_ind, pkt_id, pkt_id_old=-1;
     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
     register long row_size = 8 * N_BASELINE;
 
@@ -609,20 +609,32 @@ void recvData()
     //---   int packet_id = 1 ;
     //---   int recv_start = 0 ;  //Start up without starting to receive
 
-    while (1) // Find packet zero.
+    int i = 0;
+    int old_cnt;
+    while (Running) // Find packet zero.
     {
         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
         //        if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-        if ((int)frame_buff[18] == 0 && (int)frame_buff[26] == 42)
+        if (*(int *)(frame_buff_p + 18) == 0)
         {
-            pkt_id = 0;
-            break;
+            if (i == 0)
+                old_cnt = *(int *)(frame_buff_p + 22);
+            else
+            {
+                init_cnt = *(int *)(frame_buff_p + 22);
+                if (init_cnt != old_cnt)
+                {
+                    pkt_id = 0;
+                    break;
+                }
+            }
+            i++;
         }
     }
 
     while(Running)
     {
-        row = 0;
+        row = *(int *)(frame_buff_p + 26);
         if (buf01_state == 0)
         {
             while (row < row_in_buf)
@@ -654,8 +666,29 @@ void recvData()
                 //                    {
                 //                      pkt_id = (int)frame_buff[18];
                 //                      if (pkt_id < pkt_id_old) row++;
-                if ((pkt_id = (int)frame_buff[18]) < pkt_id_old)
-                    row++;
+                pkt_id = *(int *)(frame_buff_p + 18);
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26);
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                }
+                else if (pkt_id < pkt_id_old)
+                {
+                    while(1)
+                    {
+                        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+                        pkt_id = *(int *)(frame_buff_p + 18);
+                        if (pkt_id == 0)
+                        {
+                            current_cnt = *(int *)(frame_buff_p + 22);
+                            freq_ind = *(int *)(frame_buff_p + 26);
+                            row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                            break;
+                        }
+                    }
+                }
+
                 if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
                     fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
                 pkt_id_old = pkt_id;
@@ -664,6 +697,7 @@ void recvData()
                 //                }
             }
             buf01_state = 1;
+            init_cnt = current_cnt;
         }
         else if (buf02_state == 0)
         {
@@ -696,8 +730,29 @@ void recvData()
                 //                    {
                 //                      pkt_id = (int)frame_buff[18];
                 //                      if (pkt_id < pkt_id_old) row++;
-                if ((pkt_id = (int)frame_buff[18]) < pkt_id_old)
-                    row++;
+                pkt_id = *(int *)(frame_buff_p + 18);
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26);
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                }
+                else if (pkt_id < pkt_id_old)
+                {
+                    while(1)
+                    {
+                        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+                        pkt_id = *(int *)(frame_buff_p + 18);
+                        if (pkt_id == 0)
+                        {
+                            current_cnt = *(int *)(frame_buff_p + 22);
+                            freq_ind = *(int *)(frame_buff_p + 26);
+                            row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                            break;
+                        }
+                    }
+                }
+
                 if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
                     fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
                 pkt_id_old = pkt_id;
@@ -706,6 +761,7 @@ void recvData()
                 //                }
             }
             buf02_state = 1;
+            init_cnt = current_cnt;
         }
         else
         {
