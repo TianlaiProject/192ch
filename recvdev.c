@@ -615,7 +615,7 @@ void recvData()
     {
         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
         //        if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-        if (*(int *)(frame_buff_p + 18) == 0)
+        if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
         {
             if (i == 0)
                 old_cnt = *(int *)(frame_buff_p + 22);
@@ -672,6 +672,7 @@ void recvData()
                     current_cnt = *(int *)(frame_buff_p + 22);
                     freq_ind = *(int *)(frame_buff_p + 26);
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    printf("%d ", row);
                 }
                 else if (pkt_id < pkt_id_old)
                 {
@@ -684,6 +685,7 @@ void recvData()
                             current_cnt = *(int *)(frame_buff_p + 22);
                             freq_ind = *(int *)(frame_buff_p + 26);
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                            printf("%d ", row);
                             break;
                         }
                     }
@@ -736,6 +738,7 @@ void recvData()
                     current_cnt = *(int *)(frame_buff_p + 22);
                     freq_ind = *(int *)(frame_buff_p + 26);
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    printf("%d ", row);
                 }
                 else if (pkt_id < pkt_id_old)
                 {
@@ -748,6 +751,7 @@ void recvData()
                             current_cnt = *(int *)(frame_buff_p + 22);
                             freq_ind = *(int *)(frame_buff_p + 26);
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                            printf("%d ", row);
                             break;
                         }
                     }
