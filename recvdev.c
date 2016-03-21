@@ -44,7 +44,7 @@ int Running = 1, DataExist = 1;
 //u_char Src[12];
 //u_char Flags[4];
 FILE *fp; // Log file pointer.
-hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* Handles */
+hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* HDF% handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
 hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
 hsize_t offset[3] = {0, 0, 0}; /* subset offset in the file */
@@ -68,10 +68,40 @@ char filepath[150];
 //int cmpFlags(u_char *SrcA);
 //////////////////////////////////////////////
 
-void kill_handler(int sig_no) // When use end.sh to kill, running this part.
+/*
+  int cmpSrcAddress( u_char *SrcA , u_char *SrcB)
+  {
+  int i;
+
+  for (i=0;i<12;++i)
+  {
+  if (SrcA[i] != SrcB[i])
+  return 0;
+  }
+  return 1;
+  }
+
+  int cmpFlags( u_char *SrcA  )
+  {
+  int i;
+
+  for (i=0;i<4;++i)
+  {
+  if ( SrcA[i] != Flags[i] )
+  return 0;
+  }
+  return 1;
+
+  }
+*/
+
+
+// When use end.sh to kill, running this function
+void kill_handler(int sig_no)
 {
     if (sig_no == SIGUSR1) Running = 0;
 }
+
 
 void get_filepath(char *time_file_path)
 {
@@ -94,6 +124,7 @@ void get_filepath(char *time_file_path)
 
     folder_state = 0;
 }
+
 
 void gen_datafile()
 {
@@ -123,6 +154,7 @@ void gen_datafile()
 
     file_count++;
 }
+
 
 void writeData()
 {
@@ -212,32 +244,6 @@ void writeData()
     }
 }
 
-/*
-  int cmpSrcAddress( u_char *SrcA , u_char *SrcB)
-  {
-  int i;
-
-  for (i=0;i<12;++i)
-  {
-  if (SrcA[i] != SrcB[i])
-  return 0;
-  }
-  return 1;
-  }
-
-  int cmpFlags( u_char *SrcA  )
-  {
-  int i;
-
-  for (i=0;i<4;++i)
-  {
-  if ( SrcA[i] != Flags[i] )
-  return 0;
-  }
-  return 1;
-
-  }
-*/
 
 void recvData()
 {
@@ -445,6 +451,7 @@ void recvData()
 
     fclose(fp);
 }
+
 
 int main(int argc, char* argv[])
 {
