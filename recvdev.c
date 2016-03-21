@@ -32,11 +32,7 @@
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
-//#define recvbuflen MAX_PACKET_ID*MAX_RAWPACKET_SIZE*FREQUENCY
 
-//#define buf_packet_MAX  MAX_PACKET_ID *FREQUENCY*N_INTEGRA_TIME
-//each buf size about N_INTEGRA_TIME MB (6MB)
-//#define fp_data_count_MAX N_INTEGRA_TIME  //each datafile
 
 typedef struct {
     float   r;
@@ -48,7 +44,6 @@ int Running = 1, DataExist = 1;
 //u_char Src[12];
 //u_char Flags[4];
 FILE *fp; // Log file pointer.
-//FILE *fp_data; // Data file pointer.
 hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* Handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
 hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
@@ -58,37 +53,16 @@ hsize_t stride[3] = {1, 1, 1}; /* subset stride in the file */
 hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 
 int buf_cnt = 0;
-//---int fp_data_count=0;
-//int expected_packet_id = 0 ;          //packet id
-//int cnt = 0 ;  // pkt count.   //---Integration time
-
-//int len=0;
-//int len_data=0;
-//int m=0;
 int file_count = 0;
 int folder_state = 1;
 
 unsigned char * buf01;
 unsigned char * buf02;
-//unsigned char * recvbuf1;
-//unsigned char * recvbuf2;
-//unsigned char * recvbuf1_tmp;
-//unsigned char * recvbuf1_tmp;
-
-//int buf_count01 = 0 ;
-//int buf_count02 = 0 ;
-//int recvbuf_cnt01 = 0 ;
-//int recvbuf_cnt02 = 0 ;
-
 int buf01_state = 0 ;
 int buf02_state = 0 ;
-//int recvbuf1_state = 0 ;
-//int recvbuf2_state = 0 ;
-//0 1 -1 -2 ( idle filled input output )
-//unsigned char lostpacket01[MAX_PACKET_SIZE];
-//unsigned char lostpacket02[MIN_PACKET_SIZE];
 
 char filepath[150];
+
 /////////////////////////////////////////////
 //int cmpSrcAddress( u_char *SrcA , u_char *SrcB);
 //int cmpFlags(u_char *SrcA);
@@ -107,7 +81,7 @@ void get_filepath(char *time_file_path)
     strcpy(folderpath,filepath);
     //create a folder each time we run the program
     if(folder_state==1)
-    if(access(folderpath,0)==-1)
+    if(access(folderpath, F_OK)==-1)
     {
         int flag0=mkdir(folderpath,0755);
         if(flag0)
@@ -155,7 +129,6 @@ void writeData()
     complex_t * cbuf;
     herr_t      status;
     hid_t       sub_dataspace_id;
-    //hsize_t     count[3] = {buf_cnt*N_INTEGRA_TIME, 0, 0};              /* size of subset in the file */
 
     gen_datafile();
     int buf_init_iter;
@@ -264,310 +237,6 @@ void writeData()
   return 1;
 
   }
-
-  void gen_lostpacketAndWrite(int pkt_id)
-  {
-  if( pkt_id == (MAX_PACKET_ID-1) )
-  {
-  if(bufstate01 == -1)
-  {
-  memmove(buf1,lostpacket02,MIN_PACKET_SIZE);
-  buf1 = buf1 + MIN_PACKET_SIZE ;
-  buf_count01 ++;
-
-  if(buf_count01 == buf_packet_MAX)
-  {
-  bufstate01 = 1 ;
-  buf_count01= 0 ;
-  }
-  }
-  else if( bufstate02 == -1 )
-  {
-  memmove(buf2,lostpacket02,MIN_PACKET_SIZE);
-  buf2 = buf2 + MIN_PACKET_SIZE ;
-  buf_count02 ++;
-
-  if(buf_count02 == buf_packet_MAX)
-  {
-  bufstate02 = 1 ;
-  buf_count02= 0 ;
-  }
-  }
-  else if( bufstate01 == 0 )
-  {
-  memmove(buf1,lostpacket02,MIN_PACKET_SIZE);
-  buf1 = buf1 + MIN_PACKET_SIZE ;
-  buf_count01 ++;
-  if(expected_packet_id == MAX_PACKET_ID)
-  expected_packet_id = 0 ;
-
-  bufstate01 = -1 ;
-  }
-  else if( bufstate02 == 0 )
-  {
-  memmove(buf2,lostpacket02,MIN_PACKET_SIZE);
-  buf2 = buf2 + MIN_PACKET_SIZE ;
-  buf_count02 ++;
-
-  bufstate02 = -1 ;
-  }
-  else
-  printf(" It has no databuf to write for this time!\n");
-  }
-  else
-  {
-  if(bufstate01 == -1)
-  {
-  if(expected_packet_id == MAX_PACKET_ID)
-  expected_packet_id = 0 ;
-  memmove(buf1,lostpacket01,MAX_PACKET_SIZE);
-  buf1 = buf1 + MAX_PACKET_SIZE ;
-  buf_count01 ++;
-
-  if(buf_count01 == buf_packet_MAX)
-  {
-  bufstate01 = 1 ;
-  buf_count01= 0 ;
-  }
-  }
-  else if( bufstate02 == -1 )
-  {
-  memmove(buf2,lostpacket01,MAX_PACKET_SIZE);
-  buf2 = buf2 + MAX_PACKET_SIZE ;
-  buf_count02 ++;
-
-  if(buf_count02 == buf_packet_MAX)
-  {
-  if(expected_packet_id == MAX_PACKET_ID)
-  expected_packet_id = 0 ;
-  bufstate02 = 1 ;
-  buf_count02= 0 ;
-  }
-  }
-  else if( bufstate01 == 0 )
-  {
-  memmove(buf1,lostpacket01,MAX_PACKET_SIZE);
-  buf1 = buf1 + MAX_PACKET_SIZE ;
-  buf_count01 ++;
-
-  bufstate01 = -1 ;
-  }
-  else if( bufstate02 == 0 )
-  {
-  memmove(buf2,lostpacket01,MAX_PACKET_SIZE );
-  if(expected_packet_id == MAX_PACKET_ID)
-  expected_packet_id = 0 ;
-  buf2 = buf2 + MAX_PACKET_SIZE ;
-  buf_count02 ++;
-
-  bufstate02 = -1 ;
-  }
-  else
-  printf(" It has no databuf to write for this time!\n");
-  }
-  }
-
-  void recordPacket( u_char *pkt_data , int pcounter , int packet_len )
-  {
-  if( expected_packet_id != pcounter)
-  {
-
-  while( (((pcounter - expected_packet_id) + MAX_PACKET_ID )%MAX_PACKET_ID ) != 0 )
-  {
-  fprintf( fp," packet_id = %3d, len=%d \n", expected_packet_id, packet_len );
-  ---                if(expected_packet_id == MAX_PACKET_ID)
-  ---                     expected_packet_id = 0 ;
-  printf( " packet_id = %3d, len=%d \n", expected_packet_id, packet_len );
-
-  gen_lostpacketAndWrite( expected_packet_id );
-  expected_packet_id++;
-  expected_packet_id %= MAX_PACKET_ID;
-  ---             if(expected_packet_id == MAX_PACKET_ID)
-  ---                 expected_packet_id = 0 ;
-  }
-
-
-  printf("packet_id = %d, len=%d , lossed_num = %d\n", expected_packet_id, packet_len,\
-  (((pcounter - expected_packet_id) + MAX_PACKET_ID )%MAX_PACKET_ID ) );
-
-  }
-  //write the packet into buf
-  //    int packet_data_len = packet_len - 22 ;
-  //   pkt_data = pkt_data + 14 + 8 ;
-  int packet_data_len = packet_len - 22 ;
-  pkt_data = pkt_data + 14 + 8 ;
-  if(bufstate01 == -1)
-  {
-  memmove(buf1,pkt_data,packet_data_len);
-  buf1 = buf1 + packet_data_len ;
-  buf_count01 ++;
-
-  if(buf_count01 == buf_packet_MAX)
-  {
-  bufstate01 = 1 ;
-  buf_count01= 0 ;
-  }
-  }
-  else if( bufstate02 == -1 )
-  {
-  memmove(buf2,pkt_data,packet_data_len);
-  buf2 = buf2 + packet_data_len ;
-  buf_count02 ++;
-
-  if(buf_count02 == buf_packet_MAX)
-  {
-  bufstate02 = 1 ;
-  buf_count02= 0 ;
-  }
-  }
-  else if( bufstate01 == 0 )
-  {
-  memmove(buf1,pkt_data,packet_data_len);
-  buf1 = buf1 + packet_data_len ;
-  buf_count01 ++;
-
-  bufstate01 = -1 ;
-  }
-  else if( bufstate02 == 0 )
-  {
-  memmove(buf2,pkt_data,packet_data_len);
-  buf2 = buf2 + packet_data_len ;
-  buf_count02 ++;
-
-  bufstate02 = -1 ;
-  }
-  else
-  printf(" It has no databuf to write for this time!\n");
-
-  expected_packet_id = pcounter + 1 ;
-  expected_packet_id = expected_packet_id%MAX_PACKET_ID ;
-  }
-
-  void checkData()
-  {
-  int freq = 0 ;
-  int rawpacket_id = 0 ;
-  int cnt ;
-  unsigned char max_pkt_data[1510] ;
-  unsigned char min_pkt_data[1022] ;
-
-  while(Running)
-  {
-  if( recvbuf1_state == 1 )
-  {
-  //printf("TEST: RECVBUF1 PUTOUT (1)\n");
-  for(freq=0; freq<FREQUENCY ;freq++)
-  {
-  for(rawpacket_id=0; rawpacket_id<MAX_PACKET_ID ;rawpacket_id++)
-  {
-  //Take the pkt_cnt out to have a look in advance.
-  //Because there are two kinds of packet size
-  memcpy(min_pkt_data,recvbuf1_tmp,22);
-  //printf("TEST: CHECKDATA PUTOUT \n");
-  cnt = (int)min_pkt_data[18] ;
-
-  if( cnt < (MAX_PACKET_ID-1) )
-  {
-  memcpy(max_pkt_data,recvbuf1_tmp,MAX_RAWPACKET_SIZE);
-  //---cnt = (int)max_pkt_data[18] ;
-  recordPacket(max_pkt_data , cnt , MAX_RAWPACKET_SIZE);
-  recvbuf1_tmp = recvbuf1_tmp + MAX_RAWPACKET_SIZE ;
-  }
-  else
-  {
-  memcpy(min_pkt_data,recvbuf1_tmp,MIN_RAWPACKET_SIZE);
-  //---cnt = (int)min_pkt_data[18] ;
-  recordPacket(min_pkt_data , cnt , MIN_RAWPACKET_SIZE);
-  recvbuf1_tmp = recvbuf1_tmp + MIN_RAWPACKET_SIZE ;
-  }
-  }
-  }
-
-  recvbuf1_state = 0 ;
-  recvbuf1_tmp = recvbuf1 ;
-  //printf("TEST: RECVBUF1 PUTOUT (2)\n");
-  }
-  else if(recvbuf2_state == 1)
-  {
-  //printf("TEST: RECVBUF2 PUTOUT (1)\n");
-  for(freq=0; freq<FREQUENCY ;freq++)
-  {
-  for(rawpacket_id=0; rawpacket_id<MAX_PACKET_ID ;rawpacket_id++)
-  {
-  memcpy(min_pkt_data,recvbuf2_tmp,22);
-  cnt = (int)min_pkt_data[18] ;
-
-  if( cnt < (MAX_PACKET_ID-1) )
-  {
-  memcpy(max_pkt_data,recvbuf2_tmp,MAX_RAWPACKET_SIZE);
-  //---cnt = (int)max_pkt_data[18] ;
-  recordPacket(max_pkt_data , cnt , MAX_RAWPACKET_SIZE);
-  recvbuf2_tmp = recvbuf2_tmp + MAX_RAWPACKET_SIZE ;
-  }
-  else
-  {
-  memcpy(min_pkt_data,recvbuf2_tmp,MIN_RAWPACKET_SIZE);
-  //---cnt = (int)min_pkt_data[18] ;
-  recordPacket(min_pkt_data , cnt , MIN_RAWPACKET_SIZE);
-  recvbuf2_tmp = recvbuf2_tmp + MIN_RAWPACKET_SIZE ;
-  }
-  }
-  }
-
-  recvbuf2_state = 0 ;
-  recvbuf2_tmp = recvbuf2 ;
-  //printf("TEST: RECVBUF2 PUTOUT (2)\n");
-  }
-  }
-  }
-
-  void recvDataToBuf(u_char *pkt_data , int packet_len)
-  {
-  if(recvbuf1_state == -1) //+++ input state
-  {
-  memmove(recvbuf1_tmp,pkt_data,packet_len);
-  recvbuf1_tmp = recvbuf1_tmp + packet_len ;
-  recvbuf_cnt01 ++;
-
-  if(recvbuf_cnt01 == MAX_PACKET_ID*FREQUENCY)
-  {
-  recvbuf1_state = 1 ; //+++ full state
-  recvbuf_cnt01 = 0  ;
-  recvbuf1_tmp = recvbuf1 ;
-  }
-  }
-  else if(recvbuf2_state == -1)
-  {
-  memmove(recvbuf2_tmp,pkt_data,packet_len);
-  recvbuf2_tmp = recvbuf2_tmp + packet_len ;
-  recvbuf_cnt02 ++;
-
-  if(recvbuf_cnt02 == MAX_PACKET_ID*FREQUENCY)
-  {
-  recvbuf2_state = 1 ;
-  recvbuf_cnt02 = 0  ;
-  recvbuf2_tmp = recvbuf2 ;
-  }
-  }
-  else if(recvbuf1_state == 0)
-  {
-  memmove(recvbuf1_tmp,pkt_data,packet_len);
-  recvbuf1_tmp = recvbuf1_tmp + packet_len ;
-  recvbuf_cnt01 ++;
-
-  recvbuf1_state = -1 ;
-  }
-  else if(recvbuf2_state == 0)
-  {
-  memmove(recvbuf2_tmp,pkt_data,packet_len);
-  recvbuf2_tmp = recvbuf2_tmp + packet_len ;
-  recvbuf_cnt02 ++;
-
-  recvbuf2_state = -1 ;
-  }
-  else
-  printf("It has no recvbuf to write for this time!\n");
-  }
 */
 
 void recvData()
@@ -605,9 +274,6 @@ void recvData()
 
     printf("Begin to recv data ... \n");
     fflush(stdout);
-
-    //---   int packet_id = 1 ;
-    //---   int recv_start = 0 ;  //Start up without starting to receive
 
     int i = 0;
     int old_cnt;
@@ -782,18 +448,11 @@ void recvData()
 
 int main(int argc, char* argv[])
 {
+    int i;
+    int thread_id;
 
     signal(SIGUSR1, kill_handler);
 
-    int thread_id;
-
-    buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
-    buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
-
-    //recvbuf1 = (unsigned char *)malloc( sizeof(unsigned char)*recvbuflen );
-    //recvbuf2 = (unsigned char *)malloc( sizeof(unsigned char)*recvbuflen );
-    //recvbuf1_tmp = recvbuf1 ;
-    //recvbuf2_tmp = recvbuf2 ;
     // Receiver MAC.
     //Src[0]=0xf4;
     //Src[1]=0x52;
@@ -814,20 +473,14 @@ int main(int argc, char* argv[])
     //Flags[2]=0xff ;
     //Flags[3]=0xff ;
 
-    int i;
+
+    buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
+    buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
     for (i=0; i<buflen; i++)
     {
         buf01[i] = 0xFF;
         buf02[i] = 0xFF;
     }
-    //for(i=0;i<MIN_PACKET_SIZE;i++)
-    //{
-    //    lostpacket02[i]  = 0xFF ;
-    //}
-    //for(i=0;i<MAX_PACKET_SIZE;i++)
-    //{
-    //    lostpacket01[i]  = 0xFF ;
-    //}
 
     get_filepath(argv[1]);
 
@@ -844,8 +497,6 @@ int main(int argc, char* argv[])
 
     free(buf01);
     free(buf02);
-    //free(recvbuf1);
-    //free(recvbuf2);
 
     printf("Over.\n");
     fflush(stdout);
