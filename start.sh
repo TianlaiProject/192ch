@@ -1,17 +1,40 @@
-#!/bin/bash 
-#Cur_Dir=$(pwd)
-#filepath=$Cur_Dir'/data/'
-filepath='/home/data_hdf5/'
-#outputpath=$Cur_Dir'/tmp/'
-outputpath='/home/tmp_hdf5/'
-filetime=`date "+%Y%m%d%H%M%S"`
-outfile=${outputpath}
-filepath=${filepath}${filetime}
-if [ -d "$filepath" ]
+#!/usr/bin/env bash
+
+
+create_time=`date "+%Y%m%d%H%M%S"`
+
+cur_path=$(pwd)
+config_file="${cur_path}/cyl_config.ini"
+
+data_path='/home/data_hdf5/'
+data_path=${data_path}${create_time}
+
+output_path='/home/tmp_hdf5/'
+output_path=${output_path}${create_time}
+
+if [ ! -d "$data_path" ]
 then
-    echo "The folder existed"
+    echo "Data folder $data_path does not exist, create it..."
+    mkdir $data_path
 else
-    nohup ./recvPacket $filepath 1>${outfile}recv_std.out 2>${outfile}recv_err.out &
-#    ./recvPacket $filepath 
+    echo "Data folder $data_path exists, data will be saved in it..."
 fi
+
+if [ ! -d "$output_path" ]
+then
+    echo "Output folder $output_path does not exist, create it..."
+    mkdir $output_path
+else
+    echo "Output folder $output_path exists, output will be saved in it..."
+fi
+
+if test -e "$config_file"
+then
+    echo "Run program with configure parameters in file $config_file..."
+    nohup ./recvPacket $data_path $config_file -v --gen_obslog 1>${outputpath}recv_std.out 2>${outputpath}recv_err.out &
+    # ./recvPacket $data_path $config_file
+else
+    echo "Error: configure parameters file $config_file does not exit!!!"
+fi
+
 

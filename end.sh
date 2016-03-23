@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 PID=$(pgrep recvPacket)
 kill -USR1 $PID
