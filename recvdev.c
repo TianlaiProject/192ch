@@ -1,3 +1,4 @@
+#include <Python.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <argp.h>
@@ -18,6 +19,7 @@
 #include <linux/if_arp.h>
 #include <signal.h>
 #include "hdf5.h"
+#include "hdf5_hl.h"
 #include "ini.h"
 
 #define DEVICE_NAME "enp131s0d1"  // the name of the network device
@@ -103,15 +105,23 @@ hsize_t stride[3] = {1, 1, 1}; /* subset stride in the file */
 hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 
 int buf_cnt = 0;
-//int file_count = 0;
+int file_count = 0;
 //int folder_state = 1;
+
+int nfeeds, nchans, nbls, nns, nweather = 3;
+int *feedno, *channo, *blorder;
+float *feedpos, *antpointing, *polerr, *noisesource, *weather;
+const char *transitsource[] = {"", ""}; // no transit source for cylinder array
 
 unsigned char * buf01;
 unsigned char * buf02;
 int buf01_state = 0 ;
 int buf02_state = 0 ;
 
-char filepath[150];
+// char filepath[150];
+
+PyObject *pMain = NULL;
+PyObject *pMainDict = NULL;
 
 /////////////////////////////////////////////
 //int cmpSrcAddress( u_char *SrcA , u_char *SrcB);
@@ -180,24 +190,113 @@ void gen_obs_log()
 
 void gen_datafile(const char *data_path)
 {
-    int file_count = 0;
-    char file_name[27];
+    double int_time, span, start_offset, end_offset;
+    char *obs_time;
+    char *stime, *etime;
+    // long syear, smonth, sday, shour, sminute;
+    // long eyear, emonth, eday, ehour, eminute;
+    // double ssecond, esecond;
+    char tmp_str[150];
+    // int file_count = 0;
+    char file_name[35];
     char file_path[150];
-    char time_str[20];
-    char *time_fmt;
+    /* char time_str[20]; */
+    /* char *time_fmt; */
+    // PyObject *pObj = NULL;
+    hid_t space, dset, dcpl, dsettype, mtype;    /* Handles */
     herr_t status;
 
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
+    int_time = config.inttime; // integration time, Unit: second
+    span = int_time * N_TIME_PER_FILE; // time span in one file, Unit: second
+    start_offset = file_count * span; // offset from start time for this file, second
+    end_offset = (file_count + 1) * span - int_time; // offset from start time for this file, second
 
-    time_fmt = "%04d%02d%02d%02d%02d%02d";
-    snprintf(time_str, 15, time_fmt, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    snprintf(file_name, 27, "%s_%06d.hdf5", time_str, file_count);
+    if (file_count == 0)
+        PyRun_SimpleString("start_time = ephem.Date(ephem.localtime(ephem.now()))");
+    snprintf(tmp_str, 50, "stime = ephem.Date(start_time + %f * ephem.second)", start_offset);
+    PyRun_SimpleString(tmp_str);
+    snprintf(tmp_str, 50, "etime = ephem.Date(start_time + %f * ephem.second)", end_offset);
+    PyRun_SimpleString(tmp_str);
+    PyRun_SimpleString("obs_time = str(stime)");
+    // get value from python, better to have error checking
+    obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
+    PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % stime");
+    stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
+    PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % etime");
+    etime = PyString_AsString(PyMapping_GetItemString(pMainDict, "etime"));
+    /* obs_time = PyString_AsString(PyRun_SimpleString("str(stime)")); */
+    /* PyRun_SimpleString("(syear, smonth, sday, shour, sminute, ssecond) = stime.tuple()"); */
+    /* PyRun_SimpleString("(eyear, emonth, eday, ehour, eminute, esecond) = etime.tuple()"); */
+    /* /\* pObj = PyMapping_GetItemString(pMainDict, "syear"); *\/ */
+    /* /\* if (pObj) *\/ */
+    /* /\* { *\/ */
+    /* /\*     syear = PyInt_AsLong(pObj); *\/ */
+    /* /\*     printf("%s\n", date); *\/ */
+    /* /\* } *\/ */
+    /* /\* else *\/ */
+    /* /\* { *\/ */
+    /* /\*     PyErr_Print(); *\/ */
+    /* /\* } *\/ */
+    /* // get value from python, better to have error checking */
+    /* syear = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "syear")); */
+    /* smonth = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "smonth")); */
+    /* sday = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "sday")); */
+    /* shour = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "shour")); */
+    /* sminute = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "sminute")); */
+    /* ssecond = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "ssecond")); */
+    /* eyear = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "eyear")); */
+    /* emonth = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "emonth")); */
+    /* eday = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "eday")); */
+    /* ehour = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "ehour")); */
+    /* eminute = PyInt_AsLong(PyMapping_GetItemString(pMainDict, "eminute")); */
+    /* esecond = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "esecond")); */
+    /* time_t t = time(NULL); */
+    /* struct tm tm = *localtime(&t); */
+
+    /* time_fmt = "%04d%02d%02d%02d%02d%02d"; */
+    /* snprintf(time_str, 15, time_fmt, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec); */
+    snprintf(file_name, 35, "%s_%s.hdf5", stime, etime);
     strcpy(file_path, data_path);
     strcat(file_path, file_name);
 
     // Create a new hdf5 file using the default properties.
     file_id = H5Fcreate (file_path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+
+    // Create attributes
+    // Type A: Common
+    H5LTset_attribute_string(file_id, "/", "nickname", config.nickname);
+    H5LTset_attribute_string(file_id, "/", "comment", config.comment);
+    H5LTset_attribute_string(file_id, "/", "observer", config.observer);
+    H5LTset_attribute_string(file_id, "/", "history", config.history);
+    H5LTset_attribute_string(file_id, "/", "keywordver", config.keywordver);
+    // Type B: Site
+    H5LTset_attribute_string(file_id, "/", "sitename", config.sitename);
+    H5LTset_attribute_double(file_id, "/", "sitelat", &config.sitelat, 1);
+    H5LTset_attribute_double(file_id, "/", "sitelon", &config.sitelon, 1);
+    H5LTset_attribute_double(file_id, "/", "siteelev", &config.siteelev, 1);
+    H5LTset_attribute_string(file_id, "/", "timezone", config.timezone);
+    H5LTset_attribute_string(file_id, "/", "epoch", config.epoch);
+    // Type C: Antenna
+    H5LTset_attribute_string(file_id, "/", "telescope", config.telescope);
+    H5LTset_attribute_double(file_id, "/", "dishdiam", &config.dishdiam, 1);
+    H5LTset_attribute_int(file_id, "/", "nants", &config.nants, 1);
+    H5LTset_attribute_int(file_id, "/", "npols", &config.npols, 1);
+    H5LTset_attribute_double(file_id, "/", "cylen", &config.cylen, 1);
+    H5LTset_attribute_double(file_id, "/", "cywid", &config.cywid, 1);
+    // Type D: Receiver
+    H5LTset_attribute_string(file_id, "/", "recvver", config.recvver);
+    H5LTset_attribute_double(file_id, "/", "lofreq", &config.lofreq, 1);
+    // Type E: Correlator
+    H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
+    H5LTset_attribute_int(file_id, "/", "samplingbits", &config.samplingbits, 1);
+    H5LTset_attribute_int(file_id, "/", "corrmode", &config.corrmode, 1);
+    H5LTset_attribute_double(file_id, "/", "inttime", &config.inttime, 1);
+    H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
+    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
+    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
+    H5LTset_attribute_double(file_id, "/", "freqstep", &config.freqstep, 1);
+
+    // vis
     // Create the compound datatype for memory.
     memtype = H5Tcreate (H5T_COMPOUND, sizeof (complex_t));
     status = H5Tinsert (memtype, "r", HOFFSET(complex_t, r), H5T_NATIVE_FLOAT);
@@ -210,17 +309,204 @@ void gen_datafile(const char *data_path)
     dataspace_id = H5Screate_simple (3, dims, NULL);
     // Create the dataset to write the compound data to it later.
     dataset_id = H5Dcreate (file_id, "vis", filetype, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    // Attributes for vis
+    H5LTset_attribute_string(file_id, "vis", "dimname", "Time, Frequency, Baseline");
+
+    // for other datasets
+    // Create the dataset creation property list, set the layout to compact.
+    dcpl = H5Pcreate (H5P_DATASET_CREATE);
+    status = H5Pset_layout (dcpl, H5D_COMPACT);
+
+    // feedno
+    // Create dataspace
+    hsize_t feedno_dims[1] = {nfeeds};
+    space = H5Screate_simple (1, feedno_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "feedno", H5T_STD_I32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, feedno);
+    // Attributes for feedno
+
+    // channo
+    // Create dataspace
+    hsize_t channo_dims[2] = {nfeeds, 2};
+    space = H5Screate_simple (2, channo_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "channo", H5T_STD_I32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, channo);
+    // Attributes for channo
+    H5LTset_attribute_string(file_id, "channo", "dimname", "Feed No., (XPolarization YPolarization)");
+
+    // blorder
+    // Create dataspace
+    hsize_t blorder_dims[2] = {nbls, 2};
+    space = H5Screate_simple (2, blorder_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "blorder", H5T_STD_I32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, blorder);
+    // Attributes for blorder
+    H5LTset_attribute_string(file_id, "blorder", "dimname", "Baselines, BaselineName");
+
+    // feedpos
+    // Create dataspace
+    hsize_t feedpos_dims[2] = {nfeeds, 3};
+    space = H5Screate_simple (2, feedpos_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "feedpos", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, feedpos);
+    // Attributes for feedpos
+    H5LTset_attribute_string(file_id, "feedpos", "dimname", "Feed No., (X,Y,Z) coordinate");
+    H5LTset_attribute_string(file_id, "feedpos", "unit", "meter");
+
+    // antpointing
+    // Create dataspace
+    hsize_t antp_dims[2] = {nfeeds, 4};
+    space = H5Screate_simple (2, antp_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "antpointing", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, antpointing);
+    // Attributes for antpointing
+    H5LTset_attribute_string(file_id, "antpointing", "dimname", "Feed No., (Az,Alt,AzErr,AltErr)");
+    H5LTset_attribute_string(file_id, "antpointing", "unit", "degree");
+
+    // polerr
+    // Create dataspace
+    hsize_t polerr_dims[2] = {nfeeds, 2};
+    space = H5Screate_simple (2, polerr_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "polerr", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, polerr);
+    // Attributes for polerr
+    H5LTset_attribute_string(file_id, "polerr", "dimname", "Feed No., (XPolErr,YPolErr)");
+    H5LTset_attribute_string(file_id, "polerr", "unit", "degree");
+
+    // noisesource
+    // Create dataspace
+    hsize_t ns_dims[2] = {nns, 2};
+    space = H5Screate_simple (2, ns_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "noisesource", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, noisesource);
+    // Attributes for noisesource
+    H5LTset_attribute_string(file_id, "noisesource", "dimname", "Source No., (Cycle Duration)");
+    H5LTset_attribute_string(file_id, "noisesource", "unit", "second");
+
+    // transitsource
+    // Create file and memory datatypes, save the strings as FORTRAN strings.
+    dsettype = H5Tcopy (H5T_FORTRAN_S1);
+    status = H5Tset_size (dsettype, H5T_VARIABLE);
+    mtype = H5Tcopy (H5T_C_S1);
+    status = H5Tset_size (mtype, H5T_VARIABLE);
+    // Create dataspace
+    hsize_t ts_dims[2] = {1, 2};
+    space = H5Screate_simple (2, ts_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "transitsource", dsettype, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, mtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, transitsource);
+    // Attributes for transitsource
+    H5LTset_attribute_string(file_id, "transitsource", "dimname", "Source, (DateTime, SourceName)");
+
+    // weather
+    // Create dataspace
+    hsize_t weather_dims[2] = {nweather, 9};
+    space = H5Screate_simple (2, weather_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "weather", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+    // Attributes for weather
+    H5LTset_attribute_string(file_id, "weather", "dimname", "Weather Data,(TimeOffset, RoomTemperature, SiteTemperature, Dewpoint, Humidity, Precipitation, WindDirection, WindSpeed, Pressure)");
+    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, Celcius, Celcius, %, millimeter, degree, m/s, mmHg");
+
+    // Close and release resources.
+    status = H5Pclose (dcpl);
+    status = H5Dclose (dset);
+    status = H5Sclose (space);
+    status = H5Tclose (dsettype);
+    status = H5Tclose (mtype);
 
     file_count++;
+
 }
 
 
 void writeData(const char *data_path)
 {
     int i;
+    // int nfeeds, nchans, nbls, nns, nweather = 3;
+    // int *feedno, *channo, *blorder, *weather;
+    // float *feedpos, *antpointing, *polerr, *noisesource;
+    // const char *transitsource[] = {"", ""}; // no transit source for cylinder array
     complex_t * cbuf;
     herr_t      status;
     hid_t       sub_dataspace_id;
+
+    /* allocate and fill buffer */
+    nfeeds = config.nfeeds;
+    nchans = 2 * nfeeds;
+    nbls = nchans * (nchans + 1) / 2;
+    nns = config.nns;
+    if (nbls != N_BASELINE)
+    {
+        printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
+        exit(-1);
+    }
+    feedno=(int *)malloc( sizeof(int)*nfeeds );
+    for (i=0; i<nfeeds; i++)
+    {
+        feedno[i] = i + 1;
+    }
+    channo=(int *)malloc( sizeof(int)*nchans );
+    for (i=0; i<nchans; i++)
+    {
+        channo[i] = i + 1;
+    }
+    blorder=(int *)malloc( sizeof(int)*2*nbls );
+    for (i=0; i<2*nbls; i++)
+    {
+        // should be the correct baseline orders
+        blorder[i] = 0;
+    }
+    feedpos=(float *)malloc( sizeof(float)*3*nfeeds );
+    for (i=0; i<3*nfeeds; i++)
+    {
+        // should be the correct feed positions
+        feedpos[i] = 0.0;
+    }
+    antpointing=(float *)malloc( sizeof(float)*4*nfeeds );
+    for (i=0; i<nfeeds; i++)
+    {
+        antpointing[4*i] = 0.0;
+        antpointing[4*i+1] = 90.0;
+        antpointing[4*i+2] = 0.0; // should be correct AzErr
+        antpointing[4*i+3] = 0.0; // should be correct AltErr
+    }
+    polerr=(float *)malloc( sizeof(float)*2*nfeeds );
+    for (i=0; i<2*nfeeds; i++)
+    {
+        // should be the correct pol err
+        polerr[i] = 0.0;
+    }
+    noisesource=(float *)malloc( sizeof(float)*2*nns );
+    for (i=0; i<nns; i++)
+    {
+        // should be the correct nscycle and nsduration
+        noisesource[2*i] = 0.0;
+        noisesource[2*i+1] = 0.0;
+    }
+    weather=(float *)malloc( sizeof(float)*9*nweather );
+    for (i=0; i<9*nweather; i++)
+    {
+        // should be the correct weather values
+        weather[i] = 0.0;
+    }
 
     gen_datafile(data_path);
 
@@ -293,6 +579,14 @@ void writeData(const char *data_path)
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
         {
             // Close and release resources.
+            free(feedno);
+            free(channo);
+            free(blorder);
+            free(feedpos);
+            free(polerr);
+            free(noisesource);
+            free(weather);
+
             status = H5Dclose (dataset_id);
             status = H5Sclose (dataspace_id);
             status = H5Tclose (memtype);
@@ -652,6 +946,12 @@ static int handler(void* config, const char* section, const char* name,
 
 int main(int argc, char* argv[])
 {
+    Py_Initialize(); //initialize python
+    PySys_SetArgv(argc, argv);
+    pMain = PyImport_AddModule("__main__");
+    pMainDict = PyModule_GetDict(pMain);
+    PyRun_SimpleString("import ephem");
+
     int i;
     int nthread;
     int thread_id;
@@ -734,5 +1034,7 @@ int main(int argc, char* argv[])
 
     printf("Over.\n");
     fflush(stdout);
+
+    Py_Finalize();
     return 0;
 }
