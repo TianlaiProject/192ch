@@ -4,4 +4,6 @@
 - how to get weather data and its storage
 - gen_obs_log() function
 - error checking
+- properly exit program when error occurs
+- eliminate and reuse some redundant code
 - ...

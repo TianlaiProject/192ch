@@ -97,7 +97,7 @@ configuration config;
 int Running = 1, DataExist = 1;
 //u_char Src[12];
 //u_char Flags[4];
-hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* HDF% handles */
+hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* HDF5 handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
 hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
 hsize_t offset[3] = {0, 0, 0}; /* subset offset in the file */
@@ -669,6 +669,7 @@ void recvData(const char *data_path)
             else
             {
                 init_cnt = *(int *)(frame_buff_p + 22);
+                // find where time count changes as the starting point to receive data to buffer
                 if (init_cnt != old_cnt)
                 {
                     pkt_id = 0;
@@ -719,10 +720,11 @@ void recvData(const char *data_path)
                     current_cnt = *(int *)(frame_buff_p + 22);
                     freq_ind = *(int *)(frame_buff_p + 26);
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    printf("%d ", row);
+                    // printf("%d ", row);
                 }
-                else if (pkt_id < pkt_id_old)
+                else if (pkt_id < pkt_id_old) // have packet lost
                 {
+                    // drop packets until find packet 0
                     while(1)
                     {
                         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
@@ -732,7 +734,7 @@ void recvData(const char *data_path)
                             current_cnt = *(int *)(frame_buff_p + 22);
                             freq_ind = *(int *)(frame_buff_p + 26);
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                            printf("%d ", row);
+                            // printf("%d ", row);
                             break;
                         }
                     }
@@ -785,10 +787,11 @@ void recvData(const char *data_path)
                     current_cnt = *(int *)(frame_buff_p + 22);
                     freq_ind = *(int *)(frame_buff_p + 26);
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    printf("%d ", row);
+                    // printf("%d ", row);
                 }
-                else if (pkt_id < pkt_id_old)
+                else if (pkt_id < pkt_id_old) // have packet lost
                 {
+                    // drop packets until find packet 0
                     while(1)
                     {
                         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
@@ -798,7 +801,7 @@ void recvData(const char *data_path)
                             current_cnt = *(int *)(frame_buff_p + 22);
                             freq_ind = *(int *)(frame_buff_p + 26);
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                            printf("%d ", row);
+                            // printf("%d ", row);
                             break;
                         }
                     }
@@ -1013,18 +1016,18 @@ int main(int argc, char* argv[])
     /* parse the configuration file */
     config_file = agmts.args[1];
     if (ini_parse(config_file, handler, &config) < 0) {
-        printf("Can't load '%s'\n", config_file);
+        printf("Error: Can't load configuration file '%s'\n", config_file);
         return 1;
     }
     if (agmts.verbose) {
         printf("Configure parameters loaded from '%s'", config_file);
     }
 
-    /* create data path if it does not exit */
+    /* create data path if it does not exist */
     data_path = agmts.args[0];
     create_data_path(data_path);
 
-    /* allocate buffer */
+    /* allocate and initialize buffer */
     buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
     buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
     for (i=0; i<buflen; i++)
