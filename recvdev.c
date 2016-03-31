@@ -61,8 +61,10 @@ typedef struct
     const char* comment;
     const char* observer;
     int nns;
-    const char* nscycle;
-    const char* nsduration;
+    // const char* nscycle;
+    // const char* nsduration;
+    char* nscycle;
+    char* nsduration;
     double inttime;
     const char* keywordver;
     const char* recvver;
@@ -95,7 +97,6 @@ configuration config;
 int Running = 1, DataExist = 1;
 //u_char Src[12];
 //u_char Flags[4];
-//FILE *fp; // Log file pointer.
 hid_t file_id, filetype, memtype, dataspace_id, dataset_id; /* HDF% handles */
 hsize_t dims[3] = {N_TIME_PER_FILE, N_FREQUENCY, N_BASELINE};
 hsize_t sub_dims[3] = {N_INTEGRA_TIME, N_FREQUENCY, N_BASELINE};
@@ -106,7 +107,6 @@ hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 
 int buf_cnt = 0;
 int file_count = 0;
-//int folder_state = 1;
 
 int nfeeds, nchans, nbls, nns, nweather = 3;
 int *feedno, *channo, *blorder;
@@ -117,8 +117,6 @@ unsigned char * buf01;
 unsigned char * buf02;
 int buf01_state = 0 ;
 int buf02_state = 0 ;
-
-// char filepath[150];
 
 PyObject *pMain = NULL;
 PyObject *pMainDict = NULL;
@@ -197,7 +195,6 @@ void gen_datafile(const char *data_path)
     // long eyear, emonth, eday, ehour, eminute;
     // double ssecond, esecond;
     char tmp_str[150];
-    // int file_count = 0;
     char file_name[35];
     char file_path[150];
     /* char time_str[20]; */
@@ -255,6 +252,14 @@ void gen_datafile(const char *data_path)
 
     /* time_fmt = "%04d%02d%02d%02d%02d%02d"; */
     /* snprintf(time_str, 15, time_fmt, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec); */
+
+    // generate the observation log if required
+    if (agmts.gen_obslog && file_count == 0)
+    {
+        gen_obs_log();
+    }
+
+    // data file name
     snprintf(file_name, 35, "%s_%s.hdf5", stime, etime);
     strcpy(file_path, data_path);
     strcat(file_path, file_name);
@@ -440,15 +445,12 @@ void gen_datafile(const char *data_path)
 void writeData(const char *data_path)
 {
     int i;
-    // int nfeeds, nchans, nbls, nns, nweather = 3;
-    // int *feedno, *channo, *blorder, *weather;
-    // float *feedpos, *antpointing, *polerr, *noisesource;
-    // const char *transitsource[] = {"", ""}; // no transit source for cylinder array
-    complex_t * cbuf;
-    herr_t      status;
-    hid_t       sub_dataspace_id;
+    char data_dir[1024], feedpos_dir[1024];
+    FILE *data_file;
+    complex_t *cbuf;
+    herr_t     status;
+    hid_t      sub_dataspace_id;
 
-    /* allocate and fill buffer */
     nfeeds = config.nfeeds;
     nchans = 2 * nfeeds;
     nbls = nchans * (nchans + 1) / 2;
@@ -458,6 +460,12 @@ void writeData(const char *data_path)
         printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
         exit(-1);
     }
+
+    // get data dir
+    getcwd(data_dir, sizeof(data_dir));
+    strcat(data_dir, "/data");
+
+    /* allocate and fill buffers */
     feedno=(int *)malloc( sizeof(int)*nfeeds );
     for (i=0; i<nfeeds; i++)
     {
@@ -475,11 +483,19 @@ void writeData(const char *data_path)
         blorder[i] = 0;
     }
     feedpos=(float *)malloc( sizeof(float)*3*nfeeds );
+    strcpy(feedpos_dir, data_dir);
+    strcat(feedpos_dir, "/feedpos.dat");
+    data_file = fopen(feedpos_dir, "r");
+    if (data_file == NULL)
+    {
+        printf("Error: Fail to open file %s\n", feedpos_dir);
+        exit (-1);
+    }
     for (i=0; i<3*nfeeds; i++)
     {
-        // should be the correct feed positions
-        feedpos[i] = 0.0;
+        fscanf(data_file, "%f", &feedpos[i] );
     }
+    fclose(data_file);
     antpointing=(float *)malloc( sizeof(float)*4*nfeeds );
     for (i=0; i<nfeeds; i++)
     {
@@ -495,11 +511,17 @@ void writeData(const char *data_path)
         polerr[i] = 0.0;
     }
     noisesource=(float *)malloc( sizeof(float)*2*nns );
+    float cycle, duration;
+    char *p1=config.nscycle;
+    char *p2=config.nsduration;
     for (i=0; i<nns; i++)
     {
-        // should be the correct nscycle and nsduration
-        noisesource[2*i] = 0.0;
-        noisesource[2*i+1] = 0.0;
+        // better to have some error checking
+        cycle = strtod(p1, &p1);
+        noisesource[2*i] = cycle;
+
+        duration = strtod(p2, &p2);
+        noisesource[2*i+1] = duration;
     }
     weather=(float *)malloc( sizeof(float)*9*nweather );
     for (i=0; i<9*nweather; i++)
@@ -601,7 +623,6 @@ void writeData(const char *data_path)
 
 void recvData(const char *data_path)
 {
-    // char *opt = "enp131s0d1";
     char log_path[150];
     register int packet_len ;
     register int row = 0;
@@ -953,12 +974,9 @@ int main(int argc, char* argv[])
     PyRun_SimpleString("import ephem");
 
     int i;
-    int nthread;
     int thread_id;
     const char *config_file;
     const char *data_path;
-    // arguments agmts;
-    // configuration config;
 
     /* Signal handle. */
     signal(SIGUSR1, kill_handler);
@@ -1015,18 +1033,13 @@ int main(int argc, char* argv[])
         buf02[i] = 0xFF;
     }
 
-    nthread = 2;
-    if (agmts.gen_obslog)
-        nthread = 3;
-    #pragma omp parallel num_threads(nthread) private(thread_id)
+    #pragma omp parallel num_threads(2) private(thread_id)
     {
         thread_id = omp_get_thread_num();
         if(thread_id == 0)
             recvData(data_path);
         else if(thread_id == 1)
             writeData(data_path);
-        else if(thread_id == 2)
-            gen_obs_log();
     }
 
     free(buf01);
