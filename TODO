@@ -1,6 +1,5 @@
 - AzErr and AltErr
 - polerr
-- how to get weather data and its storage
 - gen_obs_log() function
 - error checking
 - properly exit program when error occurs
