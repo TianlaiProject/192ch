@@ -1,23 +1,24 @@
 #include <Python.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <argp.h>
-//#include <pcap.h>
-#include <time.h>
-#include <string.h>
 #include <unistd.h>
-//#include <math.h>
+#include <string.h>
+#include <signal.h>
+#include <argp.h>
 #include <omp.h>
+//#include <math.h>
+//#include <time.h>
+//#include <pcap.h>
 #include <netinet/in.h>
 //#include <net/if.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
 #include <linux/if_arp.h>
-#include <signal.h>
 #include "hdf5.h"
 #include "hdf5_hl.h"
 #include "ini.h"
@@ -66,6 +67,7 @@ typedef struct
     char* nscycle;
     char* nsduration;
     double inttime;
+    double weatherperiod;
     const char* keywordver;
     const char* recvver;
     const char* corrver;
@@ -108,7 +110,7 @@ hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 int buf_cnt = 0;
 int file_count = 0;
 
-int nfeeds, nchans, nbls, nns, nweather = 3;
+int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
 float *feedpos, *antpointing, *polerr, *noisesource, *weather;
 const char *transitsource[] = {"", ""}; // no transit source for cylinder array
@@ -179,6 +181,126 @@ void create_data_path(const char *data_path)
         printf("Error: Data path %s does not writable!!!\n", data_path);
         exit(-1);
     }
+}
+
+
+void init_buf()
+{
+    int i;
+    char data_dir[1024], feedpos_dir[1024], blorder_dir[1024];
+    FILE *data_file;
+
+    // allocate and initialize data receiving buffers
+    buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
+    buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
+    for (i=0; i<buflen; i++)
+    {
+        buf01[i] = 0xFF;
+        buf02[i] = 0xFF;
+    }
+
+    nfeeds = config.nfeeds;
+    nchans = 2 * nfeeds;
+    nbls = nchans * (nchans + 1) / 2;
+    nns = config.nns;
+    nweather = (int) (config.inttime * N_TIME_PER_FILE / config.weatherperiod);
+    if (nbls != N_BASELINE)
+    {
+        printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
+        exit(-1);
+    }
+
+    // get data dir
+    getcwd(data_dir, sizeof(data_dir));
+    strcat(data_dir, "/data");
+
+    /* allocate and fill weather related buffers */
+    feedno=(int *)malloc( sizeof(int)*nfeeds );
+    for (i=0; i<nfeeds; i++)
+    {
+        feedno[i] = i + 1;
+    }
+    channo=(int *)malloc( sizeof(int)*nchans );
+    for (i=0; i<nchans; i++)
+    {
+        channo[i] = i + 1;
+    }
+    blorder=(int *)malloc( sizeof(int)*2*nbls );
+    strcpy(blorder_dir, data_dir);
+    strcat(blorder_dir, "/blorder.dat");
+    data_file = fopen(blorder_dir, "r");
+    if (data_file == NULL)
+    {
+        printf("Error: Fail to open file %s\n", blorder_dir);
+        exit (-1);
+    }
+    for (i=0; i<2*nbls; i++)
+    {
+        fscanf(data_file, "%d", &blorder[i] );
+    }
+    fclose(data_file);
+    feedpos=(float *)malloc( sizeof(float)*3*nfeeds );
+    strcpy(feedpos_dir, data_dir);
+    strcat(feedpos_dir, "/feedpos.dat");
+    data_file = fopen(feedpos_dir, "r");
+    if (data_file == NULL)
+    {
+        printf("Error: Fail to open file %s\n", feedpos_dir);
+        exit (-1);
+    }
+    for (i=0; i<3*nfeeds; i++)
+    {
+        fscanf(data_file, "%f", &feedpos[i] );
+    }
+    fclose(data_file);
+    antpointing=(float *)malloc( sizeof(float)*4*nfeeds );
+    for (i=0; i<nfeeds; i++)
+    {
+        antpointing[4*i] = 0.0;
+        antpointing[4*i+1] = 90.0;
+        antpointing[4*i+2] = 0.0; // should be correct AzErr
+        antpointing[4*i+3] = 0.0; // should be correct AltErr
+    }
+    polerr=(float *)malloc( sizeof(float)*2*nfeeds );
+    for (i=0; i<2*nfeeds; i++)
+    {
+        // should be the correct pol err
+        polerr[i] = 0.0;
+    }
+    noisesource=(float *)malloc( sizeof(float)*2*nns );
+    float cycle, duration;
+    char *p1=config.nscycle;
+    char *p2=config.nsduration;
+    for (i=0; i<nns; i++)
+    {
+        // better to have some error checking
+        cycle = strtod(p1, &p1);
+        noisesource[2*i] = cycle;
+
+        duration = strtod(p2, &p2);
+        noisesource[2*i+1] = duration;
+    }
+    weather=(float *)malloc( sizeof(float)*9*nweather );
+    // initialize weather data to nan
+    for (i=0; i<9*nweather; i++)
+    {
+        weather[i] = 0xFF;
+    }
+
+}
+
+
+void free_buf()
+{
+    free(buf01);
+    free(buf02);
+    free(feedno);
+    free(channo);
+    free(blorder);
+    free(feedpos);
+    free(polerr);
+    free(noisesource);
+    free(weather);
 }
 
 
@@ -445,90 +567,9 @@ void gen_datafile(const char *data_path)
 void writeData(const char *data_path)
 {
     int i;
-    char data_dir[1024], feedpos_dir[1024];
-    FILE *data_file;
     complex_t *cbuf;
     herr_t     status;
     hid_t      sub_dataspace_id;
-
-    nfeeds = config.nfeeds;
-    nchans = 2 * nfeeds;
-    nbls = nchans * (nchans + 1) / 2;
-    nns = config.nns;
-    if (nbls != N_BASELINE)
-    {
-        printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
-        exit(-1);
-    }
-
-    // get data dir
-    getcwd(data_dir, sizeof(data_dir));
-    strcat(data_dir, "/data");
-
-    /* allocate and fill buffers */
-    feedno=(int *)malloc( sizeof(int)*nfeeds );
-    for (i=0; i<nfeeds; i++)
-    {
-        feedno[i] = i + 1;
-    }
-    channo=(int *)malloc( sizeof(int)*nchans );
-    for (i=0; i<nchans; i++)
-    {
-        channo[i] = i + 1;
-    }
-    blorder=(int *)malloc( sizeof(int)*2*nbls );
-    for (i=0; i<2*nbls; i++)
-    {
-        // should be the correct baseline orders
-        blorder[i] = 0;
-    }
-    feedpos=(float *)malloc( sizeof(float)*3*nfeeds );
-    strcpy(feedpos_dir, data_dir);
-    strcat(feedpos_dir, "/feedpos.dat");
-    data_file = fopen(feedpos_dir, "r");
-    if (data_file == NULL)
-    {
-        printf("Error: Fail to open file %s\n", feedpos_dir);
-        exit (-1);
-    }
-    for (i=0; i<3*nfeeds; i++)
-    {
-        fscanf(data_file, "%f", &feedpos[i] );
-    }
-    fclose(data_file);
-    antpointing=(float *)malloc( sizeof(float)*4*nfeeds );
-    for (i=0; i<nfeeds; i++)
-    {
-        antpointing[4*i] = 0.0;
-        antpointing[4*i+1] = 90.0;
-        antpointing[4*i+2] = 0.0; // should be correct AzErr
-        antpointing[4*i+3] = 0.0; // should be correct AltErr
-    }
-    polerr=(float *)malloc( sizeof(float)*2*nfeeds );
-    for (i=0; i<2*nfeeds; i++)
-    {
-        // should be the correct pol err
-        polerr[i] = 0.0;
-    }
-    noisesource=(float *)malloc( sizeof(float)*2*nns );
-    float cycle, duration;
-    char *p1=config.nscycle;
-    char *p2=config.nsduration;
-    for (i=0; i<nns; i++)
-    {
-        // better to have some error checking
-        cycle = strtod(p1, &p1);
-        noisesource[2*i] = cycle;
-
-        duration = strtod(p2, &p2);
-        noisesource[2*i+1] = duration;
-    }
-    weather=(float *)malloc( sizeof(float)*9*nweather );
-    for (i=0; i<9*nweather; i++)
-    {
-        // should be the correct weather values
-        weather[i] = 0.0;
-    }
 
     gen_datafile(data_path);
 
@@ -601,14 +642,6 @@ void writeData(const char *data_path)
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
         {
             // Close and release resources.
-            free(feedno);
-            free(channo);
-            free(blorder);
-            free(feedpos);
-            free(polerr);
-            free(noisesource);
-            free(weather);
-
             status = H5Dclose (dataset_id);
             status = H5Sclose (dataspace_id);
             status = H5Tclose (memtype);
@@ -640,7 +673,7 @@ void recvData(const char *data_path)
     struct ifreq ifr;
     FILE *fp;
 
-    // initalize network related things
+    // initialize network related things
     recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     bzero(&sll, sizeof(sll));
     bzero(&ifr, sizeof(ifr));
@@ -915,6 +948,8 @@ static int handler(void* config, const char* section, const char* name,
         pconfig->nsduration = strdup(value);
     } else if (MATCH("fix", "inttime")) {
         pconfig->inttime = atof(value);
+    } else if (MATCH("fix", "weatherperiod")) {
+        pconfig->weatherperiod = atof(value);
     } else if (MATCH("fix", "keywordver")) {
         pconfig->keywordver = strdup(value);
     } else if (MATCH("fix", "recvver")) {
@@ -976,7 +1011,6 @@ int main(int argc, char* argv[])
     pMainDict = PyModule_GetDict(pMain);
     PyRun_SimpleString("import ephem");
 
-    int i;
     int thread_id;
     const char *config_file;
     const char *data_path;
@@ -1028,13 +1062,7 @@ int main(int argc, char* argv[])
     create_data_path(data_path);
 
     /* allocate and initialize buffer */
-    buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
-    buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
-    for (i=0; i<buflen; i++)
-    {
-        buf01[i] = 0xFF;
-        buf02[i] = 0xFF;
-    }
+    init_buf();
 
     #pragma omp parallel num_threads(2) private(thread_id)
     {
@@ -1045,8 +1073,8 @@ int main(int argc, char* argv[])
             writeData(data_path);
     }
 
-    free(buf01);
-    free(buf02);
+    // release resources
+    free_buf();
 
     printf("Over.\n");
     fflush(stdout);
