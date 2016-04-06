@@ -210,117 +210,123 @@ void timer_handler(int sig_no)
             {
                 printf("Error: Get invalid weather data!!!\n");
             }
-            strncpy(substr, buf+1, 4);
-            substr[4] = '\0';
-            // to lower case
-            for (i = 0; substr[i]; i++)
-            {
-                substr[i] = toupper(substr[i]);
-            }
-            if (strcmp(substr, WS_DEVNO))
-            {
-                printf("Error: Weather data does not get from the required device!!!\n");
-            }
-            strncpy(substr, buf+5, 4);
-            substr[4] = '\0';
-            if (strcmp(substr, WS_CMDGETDATA))
-            {
-                printf("Error: Something wrong happend for the weather data!!!\n");
-            }
             else
             {
-                /*
-                  Information is:
-                  5116160414 Time:MMHHddmmyy
-                  00000000   Total radiation 1
-                  00000000   Total radiation 2
-                  80008000800080008000 Temperature 1,2,3,4,5
-                  0106       Temperature
-                  022d       Humidity
-                  0681       Dew point
-                  24f5       Pressure
-                  024b       Height
-                  0000       Current wind speed
-                  0000       Wind speed in 2 minute average
-                  0000       Wind speed in 10minute average
-                  0008       Wind direction
-                  0000       Current radiation 1
-                  0000       Current radiation 2
-                  0000       Precipitation
-                  000000     Evaporation
-                  0086       Power capacity
-                  00         Sunshine hours
-                */
-                // get time offset
-                char min[3], hour[3], day[3], mon[3], year[3];
-                char dev_time[25];
-                char tmp_str[50];
-                int number;
-                strncpy(min, buf+9, 2);
-                min[2] = '\0';
-                strncpy(hour, buf+11, 2);
-                hour[2] = '\0';
-                strncpy(day, buf+13, 2);
-                day[2] = '\0';
-                strncpy(mon, buf+15, 2);
-                mon[2] = '\0';
-                strncpy(year, buf+17, 2);
-                year[2] = '\0';
-                snprintf(dev_time, sizeof(dev_time), "20%s/%s/%s %s:%s:00", year, mon, day, hour, min);
-                snprintf(tmp_str, sizeof(tmp_str), "offset = (ephem.Date(%s) - stime) * %d", dev_time, SECOND_PER_DAY);
-                PyRun_SimpleString(tmp_str);
-                weather[9*timer_cnt] = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "offset")); // time offset in second
-
-                // temperature
-                strncpy(substr, buf+55, 4);
+                strncpy(substr, buf+1, 4);
                 substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                number = ((number > 32767) ? (0x8000 - number) : number);
-                weather[9*timer_cnt+1] = number / 10.0;
+                // to upper case
+                for (i = 0; substr[i]; i++)
+                {
+                    substr[i] = toupper(substr[i]);
+                }
+                if (strcmp(substr, WS_DEVNO))
+                {
+                    printf("Error: Weather data does not get from the required device!!!\n");
+                }
+                else
+                {
+                    strncpy(substr, buf+5, 4);
+                    substr[4] = '\0';
+                    if (strcmp(substr, WS_CMDGETDATA))
+                    {
+                        printf("Error: Something wrong happend for the weather data!!!\n");
+                    }
+                    else
+                    {
+                        /*
+                          Information is:
+                          5116160414 Time:MMHHddmmyy
+                          00000000   Total radiation 1
+                          00000000   Total radiation 2
+                          80008000800080008000 Temperature 1,2,3,4,5
+                          0106       Temperature
+                          022d       Humidity
+                          0681       Dew point
+                          24f5       Pressure
+                          024b       Height
+                          0000       Current wind speed
+                          0000       Wind speed in 2 minute average
+                          0000       Wind speed in 10minute average
+                          0008       Wind direction
+                          0000       Current radiation 1
+                          0000       Current radiation 2
+                          0000       Precipitation
+                          000000     Evaporation
+                          0086       Power capacity
+                          00         Sunshine hours
+                        */
+                        // get time offset
+                        char min[3], hour[3], day[3], mon[3], year[3];
+                        char dev_time[25];
+                        char tmp_str[50];
+                        int number;
+                        strncpy(min, buf+9, 2);
+                        min[2] = '\0';
+                        strncpy(hour, buf+11, 2);
+                        hour[2] = '\0';
+                        strncpy(day, buf+13, 2);
+                        day[2] = '\0';
+                        strncpy(mon, buf+15, 2);
+                        mon[2] = '\0';
+                        strncpy(year, buf+17, 2);
+                        year[2] = '\0';
+                        snprintf(dev_time, sizeof(dev_time), "20%s/%s/%s %s:%s:00", year, mon, day, hour, min);
+                        snprintf(tmp_str, sizeof(tmp_str), "offset = (ephem.Date(%s) - stime) * %d", dev_time, SECOND_PER_DAY);
+                        PyRun_SimpleString(tmp_str);
+                        weather[9*timer_cnt] = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "offset")); // time offset in second
 
-                // humidity
-                strncpy(substr, buf+59, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+2] = number / 10.0;
+                        // temperature
+                        strncpy(substr, buf+55, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        number = ((number > 32767) ? (0x8000 - number) : number);
+                        weather[9*timer_cnt+1] = number / 10.0;
 
-                // dew_point
-                strncpy(substr, buf+63, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                number = ((number > 32767) ? (0x8000 - number) : number);
-                weather[9*timer_cnt+3] = number / 100.0;
+                        // humidity
+                        strncpy(substr, buf+59, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+2] = number / 10.0;
 
-                // windspeed_current
-                strncpy(substr, buf+75, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+4] = number / 10.0;
+                        // dew_point
+                        strncpy(substr, buf+63, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        number = ((number > 32767) ? (0x8000 - number) : number);
+                        weather[9*timer_cnt+3] = number / 100.0;
 
-                // windspeed_2minaverage
-                strncpy(substr, buf+79, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+5] = number / 10.0;
+                        // windspeed_current
+                        strncpy(substr, buf+75, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+4] = number / 10.0;
 
-                // windspeed_10minaverage
-                strncpy(substr, buf+83, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+6] = number / 10.0;
+                        // windspeed_2minaverage
+                        strncpy(substr, buf+79, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+5] = number / 10.0;
 
-                // windspeed_direction
-                strncpy(substr, buf+87, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+7] = number;
+                        // windspeed_10minaverage
+                        strncpy(substr, buf+83, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+6] = number / 10.0;
 
-                // precipitation
-                strncpy(substr, buf+99, 4);
-                substr[4] = '\0';
-                number = (int)strtol(substr, NULL, 16);
-                weather[9*timer_cnt+8] = number / 10.0;
+                        // windspeed_direction
+                        strncpy(substr, buf+87, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+7] = number;
 
+                        // precipitation
+                        strncpy(substr, buf+99, 4);
+                        substr[4] = '\0';
+                        number = (int)strtol(substr, NULL, 16);
+                        weather[9*timer_cnt+8] = number / 10.0;
+
+                    }
+                }
             }
         }
         else
@@ -762,6 +768,7 @@ void writeData(const char *data_path)
     if((sockfd = socket(PF_INET , SOCK_STREAM , 0)) < 0)
     {
         perror("Socket");
+        printf("Error: Weather data will not get");
     }
     else
     {
@@ -771,6 +778,7 @@ void writeData(const char *data_path)
             char err_str[200];
             snprintf(err_str, sizeof(err_str), "Connect to IP %s", WS_REMOTE_IP);
             perror(err_str);
+            printf("Error: Weather data will not get");
         }
     }
 
@@ -933,7 +941,7 @@ void recvData(const char *data_path)
 
     strcpy(log_path, data_path);
     strcat(log_path, "recv_data.log");
-    fp= fopen(log_path, "wb");
+    fp = fopen(log_path, "wb");
 
     printf("Begin to receive data ... \n");
     fflush(stdout);
