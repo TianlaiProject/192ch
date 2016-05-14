@@ -531,7 +531,7 @@ void gen_obs_log()
 
 void gen_datafile(const char *data_path)
 {
-    double int_time, span, start_offset, end_offset;
+    double accurate_inttime, span, start_offset, end_offset;
     time_t t;
     struct tm tm;
     char cur_time[20];
@@ -548,10 +548,10 @@ void gen_datafile(const char *data_path)
     hid_t space, dset, dcpl, dsettype, mtype;    /* Handles */
     herr_t status;
 
-    int_time = config.inttime; // integration time, Unit: second
-    span = int_time * N_TIME_PER_FILE; // time span in one file, Unit: second
+    accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9 // integration time, Unit: second
+    span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
-    end_offset = (file_count + 1) * span - int_time; // offset from start time for this file, second
+    end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
 
     // calibrate the device time of the weather station
     if (conn_status == 0) // while successfully connected to the weather station
@@ -574,11 +574,11 @@ void gen_datafile(const char *data_path)
     }
 
     // if (file_count == 0)
-    //     PyRun_SimpleString("start_time = ephem.Date(ephem.localtime(ephem.now()))");
+    //     PyRun_SimpleString("start_timestamp = time.time()");
     // wait until start_time has been set, that is we have began to receive data
     while (pObj == NULL)
     {
-        pObj = PyMapping_GetItemString(pMainDict, "start_time");
+        pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
     }
     // now setup the timer and begin to get weather data
     if (conn_status == 0) // while successfully connected to the weather station
@@ -588,16 +588,17 @@ void gen_datafile(const char *data_path)
         timer_cnt = 0;
     }
     // start and end time for this hdf5 file
-    snprintf(tmp_str, sizeof(tmp_str), "stime = ephem.Date(start_time + %f * ephem.second)", start_offset);
+    PyRun_SimpleString("start_time = datetime.datetime.fromtimestamp(start_timestamp)");
+    snprintf(tmp_str, sizeof(tmp_str), "stime = start_time + datetime.timedelta(seconds=%f)", start_offset);
     PyRun_SimpleString(tmp_str);
-    snprintf(tmp_str, sizeof(tmp_str), "etime = ephem.Date(start_time + %f * ephem.second)", end_offset);
+    snprintf(tmp_str, sizeof(tmp_str), "etime = start_time + datetime.timedelta(seconds=%f)", end_offset);
     PyRun_SimpleString(tmp_str);
-    PyRun_SimpleString("obs_time = str(stime)");
+    PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
     // get value from python, better to have error checking
     obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
-    PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % stime.tuple()");
+    PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % (stime.year, stime.month, stime.day, stime.hour, stime.minute, stime.second)");
     stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
-    PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % etime.tuple()");
+    PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % (etime.year, etime.month, etime.day, etime.hour, etime.minute, etime.second)");
     etime = PyString_AsString(PyMapping_GetItemString(pMainDict, "etime"));
 
     // generate the observation log if required
@@ -1032,7 +1033,7 @@ void recvData(const char *data_path)
                 {
                     pkt_id = 0;
                     // use this time as the data receiving start time (may need more accurate start time, but how to get?)
-                    PyRun_SimpleString("start_time = ephem.Date(ephem.localtime(ephem.now()))");
+                    PyRun_SimpleString("start_timestamp = time.time()");
                     break;
                 }
             }
@@ -1338,7 +1339,8 @@ int main(int argc, char* argv[])
     PySys_SetArgv(argc, argv);
     pMain = PyImport_AddModule("__main__");
     pMainDict = PyModule_GetDict(pMain);
-    PyRun_SimpleString("import ephem");
+    PyRun_SimpleString("import time");
+    PyRun_SimpleString("import datetime");
 
     int thread_id;
     const char *config_file;
