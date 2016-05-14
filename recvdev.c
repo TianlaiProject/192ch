@@ -26,7 +26,7 @@
 
 #define DEVICE_NAME "enp131s0d1"  // the name of the network device
 
-#define BUFSIZE            2000
+#define BUFSIZE            2048
 #define MAX_PACKET_ID      100
 #define MAX_PACKET_SIZE    1488
 #define FIRST_PACKET_SIZE  1488 - 8
@@ -36,6 +36,7 @@
 
 #define N_BASELINE ((MAX_PACKET_ID - 1)*MAX_PACKET_SIZE + MIN_PACKET_SIZE - 88) / 8 // 4 bytes real and 4 bytes imag
 #define N_FREQUENCY 1008 //(1008 - 42)
+#define FREQ_OFFSET 257
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
@@ -1043,7 +1044,7 @@ void recvData(const char *data_path)
 
     while(Running)
     {
-        row = *(int *)(frame_buff_p + 26);
+        row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
         if (buf01_state == 0)
         {
             while (row < row_in_buf)
@@ -1079,7 +1080,7 @@ void recvData(const char *data_path)
                 if (pkt_id == 0)
                 {
                     current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
                     // printf("%d ", row);
                 }
@@ -1093,7 +1094,7 @@ void recvData(const char *data_path)
                         if (pkt_id == 0)
                         {
                             current_cnt = *(int *)(frame_buff_p + 22);
-                            freq_ind = *(int *)(frame_buff_p + 26);
+                            freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
                             // printf("%d ", row);
                             break;
@@ -1146,7 +1147,7 @@ void recvData(const char *data_path)
                 if (pkt_id == 0)
                 {
                     current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
                     // printf("%d ", row);
                 }
@@ -1160,7 +1161,7 @@ void recvData(const char *data_path)
                         if (pkt_id == 0)
                         {
                             current_cnt = *(int *)(frame_buff_p + 22);
-                            freq_ind = *(int *)(frame_buff_p + 26);
+                            freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
                             // printf("%d ", row);
                             break;
