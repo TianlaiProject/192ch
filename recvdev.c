@@ -42,18 +42,20 @@
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 
-// weater station related
-#define WS_REMOTE_IP       "192.168.1.109"
-#define WS_REMOTE_PORT     5555
-#define WS_HEADER          "#"
-#define WS_DEVNO           "9FCF"
-#define WS_CMDGETDATA      "030C"
-#define WS_CMDSETTIME      "010A"
-#define WS_GETTAILER       "GG"
-#define WS_SETTAILER       "G"
-#define WS_GETDATA_CMD     WS_HEADER WS_DEVNO WS_CMDGETDATA WS_SETTAILER
+// weather related
+#define WEATHER_PATH     "cosm2_share/newest_weather_data.txt"
 
-#define SECOND_PER_DAY     24 * 3600
+/* #define WS_REMOTE_IP       "192.168.1.109" */
+/* #define WS_REMOTE_PORT     5555 */
+/* #define WS_HEADER          "#" */
+/* #define WS_DEVNO           "9FCF" */
+/* #define WS_CMDGETDATA      "030C" */
+/* #define WS_CMDSETTIME      "010A" */
+/* #define WS_GETTAILER       "GG" */
+/* #define WS_SETTAILER       "G" */
+/* #define WS_GETDATA_CMD     WS_HEADER WS_DEVNO WS_CMDGETDATA WS_SETTAILER */
+
+/* #define SECOND_PER_DAY     24 * 3600 */
 
 
 /* Used to save data as complex float number in HDF5 file. */
@@ -128,13 +130,15 @@ hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 int buf_cnt = 0;
 int file_count = 0;
 
+int weather_exist = 0;
+char weather_file[1024];
 struct itimerval new_value, old_value; // for timer use
 int timer_cnt = 0;
-int sockfd = -1;
-int conn_status = -1;
+// int sockfd = -1;
+// int conn_status = -1;
 int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
-float *feedpos, *antpointing, *pointingtime, *polerr, *noisesource, *weather;
+float *feedpos, *antpointing, *pointingtime, *polerr, *nspos, *noisesource, *weather;
 const float *transitsource[] = {}; // no transit source for cylinder array
 
 unsigned char * buf01;
@@ -190,152 +194,182 @@ void kill_handler(int sig_no)
 void timer_handler(int sig_no)
 {
     int i;
-    int len;
-    char buf[BUFSIZ];
-    char header[2];
-    char tailer[3];
-    char substr[strlen(buf)];
+    FILE *fp;
+    char str[13][20];
+    /* int len; */
+    /* char buf[BUFSIZ]; */
+    /* char header[2]; */
+    /* char tailer[3]; */
+    /* char substr[strlen(buf)]; */
 
     if (sig_no == SIGALRM && timer_cnt < nweather)
     {
-        // better to request several times when failure occurs
-        len = send(sockfd, WS_GETDATA_CMD, strlen(WS_GETDATA_CMD), 0);
-        len = recv(sockfd, buf, BUFSIZ, 0); // receive weather data
-        if (len == 117)
+        fp = fopen(weather_file, "r");
+        if (fp == NULL)
         {
-            buf[len] = '\0';
-
-            strncpy(header, buf, 1);
-            header[1] = '\0';
-            strncpy(tailer, buf+len-2, 2);
-            tailer[2] = '\0';
-            if (strcmp(header, WS_HEADER) || strcmp(tailer, WS_GETTAILER))
-            {
-                printf("Error: Get invalid weather data!!!\n");
-            }
-            else
-            {
-                strncpy(substr, buf+1, 4);
-                substr[4] = '\0';
-                // to upper case
-                for (i = 0; substr[i]; i++)
-                {
-                    substr[i] = toupper(substr[i]);
-                }
-                if (strcmp(substr, WS_DEVNO))
-                {
-                    printf("Error: Weather data does not get from the required device!!!\n");
-                }
-                else
-                {
-                    strncpy(substr, buf+5, 4);
-                    substr[4] = '\0';
-                    if (strcmp(substr, WS_CMDGETDATA))
-                    {
-                        printf("Error: Something wrong happend for the weather data!!!\n");
-                    }
-                    else
-                    {
-                        /*
-                          Information is:
-                          5116160414 Time:MMHHddmmyy
-                          00000000   Total radiation 1
-                          00000000   Total radiation 2
-                          80008000800080008000 Temperature 1,2,3,4,5
-                          0106       Temperature
-                          022d       Humidity
-                          0681       Dew point
-                          24f5       Pressure
-                          024b       Height
-                          0000       Current wind speed
-                          0000       Wind speed in 2 minute average
-                          0000       Wind speed in 10minute average
-                          0008       Wind direction
-                          0000       Current radiation 1
-                          0000       Current radiation 2
-                          0000       Precipitation
-                          000000     Evaporation
-                          0086       Power capacity
-                          00         Sunshine hours
-                        */
-                        // get time offset
-                        char min[3], hour[3], day[3], mon[3], year[3];
-                        char dev_time[25];
-                        char tmp_str[50];
-                        int number;
-                        strncpy(min, buf+9, 2);
-                        min[2] = '\0';
-                        strncpy(hour, buf+11, 2);
-                        hour[2] = '\0';
-                        strncpy(day, buf+13, 2);
-                        day[2] = '\0';
-                        strncpy(mon, buf+15, 2);
-                        mon[2] = '\0';
-                        strncpy(year, buf+17, 2);
-                        year[2] = '\0';
-                        snprintf(dev_time, sizeof(dev_time), "20%s/%s/%s %s:%s:00", year, mon, day, hour, min);
-                        snprintf(tmp_str, sizeof(tmp_str), "offset = (ephem.Date(%s) - stime) * %d", dev_time, SECOND_PER_DAY);
-                        PyRun_SimpleString(tmp_str);
-                        weather[9*timer_cnt] = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "offset")); // time offset in second
-
-                        // temperature
-                        strncpy(substr, buf+55, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        number = ((number > 32767) ? (0x8000 - number) : number);
-                        weather[9*timer_cnt+1] = number / 10.0;
-
-                        // humidity
-                        strncpy(substr, buf+59, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+2] = number / 10.0;
-
-                        // dew_point
-                        strncpy(substr, buf+63, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        number = ((number > 32767) ? (0x8000 - number) : number);
-                        weather[9*timer_cnt+3] = number / 100.0;
-
-                        // windspeed_current
-                        strncpy(substr, buf+75, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+4] = number / 10.0;
-
-                        // windspeed_2minaverage
-                        strncpy(substr, buf+79, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+5] = number / 10.0;
-
-                        // windspeed_10minaverage
-                        strncpy(substr, buf+83, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+6] = number / 10.0;
-
-                        // windspeed_direction
-                        strncpy(substr, buf+87, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+7] = number;
-
-                        // precipitation
-                        strncpy(substr, buf+99, 4);
-                        substr[4] = '\0';
-                        number = (int)strtol(substr, NULL, 16);
-                        weather[9*timer_cnt+8] = number / 10.0;
-
-                    }
-                }
-            }
+            printf("Error: Fail to open file %s\n", weather_file);
+            exit (-1);
         }
-        else
+
+        while (fscanf(fp, "%s %s %s %s %s %s %s %s %s %s %s %s %s", str[0], str[1], str[2], str[3], str[4], str[5], str[6], str[7], str[8], str[9], str[10], str[11], str[12]) == 13)
         {
-            printf("Error: Get wrong weather data!!!\n");
+            if (str[0][0] != '#')
+            {
+                // maybe should check if data is up to date
+                // only use values 1, 2, 3, 4, 5, 6, 7, 8, 10, 12
+                for (i=1; i<9; i++)
+                    weather[10*timer_cnt+i-1] = strtod(str[i], (char **)&str[i]);
+                weather[10*timer_cnt+8] = strtod(str[10], (char **)&str[10]);
+                weather[10*timer_cnt+9] = strtod(str[12], (char **)&str[12]);
+
+                break;
+            }
+
         }
+
+        fclose(fp);
+
+
+
+
+        /* // better to request several times when failure occurs */
+        /* len = send(sockfd, WS_GETDATA_CMD, strlen(WS_GETDATA_CMD), 0); */
+        /* len = recv(sockfd, buf, BUFSIZ, 0); // receive weather data */
+        /* if (len == 117) */
+        /* { */
+        /*     buf[len] = '\0'; */
+
+        /*     strncpy(header, buf, 1); */
+        /*     header[1] = '\0'; */
+        /*     strncpy(tailer, buf+len-2, 2); */
+        /*     tailer[2] = '\0'; */
+        /*     if (strcmp(header, WS_HEADER) || strcmp(tailer, WS_GETTAILER)) */
+        /*     { */
+        /*         printf("Error: Get invalid weather data!!!\n"); */
+        /*     } */
+        /*     else */
+        /*     { */
+        /*         strncpy(substr, buf+1, 4); */
+        /*         substr[4] = '\0'; */
+        /*         // to upper case */
+        /*         for (i = 0; substr[i]; i++) */
+        /*         { */
+        /*             substr[i] = toupper(substr[i]); */
+        /*         } */
+        /*         if (strcmp(substr, WS_DEVNO)) */
+        /*         { */
+        /*             printf("Error: Weather data does not get from the required device!!!\n"); */
+        /*         } */
+        /*         else */
+        /*         { */
+        /*             strncpy(substr, buf+5, 4); */
+        /*             substr[4] = '\0'; */
+        /*             if (strcmp(substr, WS_CMDGETDATA)) */
+        /*             { */
+        /*                 printf("Error: Something wrong happend for the weather data!!!\n"); */
+        /*             } */
+        /*             else */
+        /*             { */
+        /*                 /\* */
+        /*                   Information is: */
+        /*                   5116160414 Time:MMHHddmmyy */
+        /*                   00000000   Total radiation 1 */
+        /*                   00000000   Total radiation 2 */
+        /*                   80008000800080008000 Temperature 1,2,3,4,5 */
+        /*                   0106       Temperature */
+        /*                   022d       Humidity */
+        /*                   0681       Dew point */
+        /*                   24f5       Pressure */
+        /*                   024b       Height */
+        /*                   0000       Current wind speed */
+        /*                   0000       Wind speed in 2 minute average */
+        /*                   0000       Wind speed in 10minute average */
+        /*                   0008       Wind direction */
+        /*                   0000       Current radiation 1 */
+        /*                   0000       Current radiation 2 */
+        /*                   0000       Precipitation */
+        /*                   000000     Evaporation */
+        /*                   0086       Power capacity */
+        /*                   00         Sunshine hours */
+        /*                 *\/ */
+        /*                 // get time offset */
+        /*                 char min[3], hour[3], day[3], mon[3], year[3]; */
+        /*                 char dev_time[25]; */
+        /*                 char tmp_str[50]; */
+        /*                 int number; */
+        /*                 strncpy(min, buf+9, 2); */
+        /*                 min[2] = '\0'; */
+        /*                 strncpy(hour, buf+11, 2); */
+        /*                 hour[2] = '\0'; */
+        /*                 strncpy(day, buf+13, 2); */
+        /*                 day[2] = '\0'; */
+        /*                 strncpy(mon, buf+15, 2); */
+        /*                 mon[2] = '\0'; */
+        /*                 strncpy(year, buf+17, 2); */
+        /*                 year[2] = '\0'; */
+        /*                 snprintf(dev_time, sizeof(dev_time), "20%s/%s/%s %s:%s:00", year, mon, day, hour, min); */
+        /*                 snprintf(tmp_str, sizeof(tmp_str), "offset = (ephem.Date(%s) - stime) * %d", dev_time, SECOND_PER_DAY); */
+        /*                 PyRun_SimpleString(tmp_str); */
+        /*                 weather[9*timer_cnt] = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "offset")); // time offset in second */
+
+        /*                 // temperature */
+        /*                 strncpy(substr, buf+55, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 number = ((number > 32767) ? (0x8000 - number) : number); */
+        /*                 weather[9*timer_cnt+1] = number / 10.0; */
+
+        /*                 // humidity */
+        /*                 strncpy(substr, buf+59, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+2] = number / 10.0; */
+
+        /*                 // dew_point */
+        /*                 strncpy(substr, buf+63, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 number = ((number > 32767) ? (0x8000 - number) : number); */
+        /*                 weather[9*timer_cnt+3] = number / 100.0; */
+
+        /*                 // windspeed_current */
+        /*                 strncpy(substr, buf+75, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+4] = number / 10.0; */
+
+        /*                 // windspeed_2minaverage */
+        /*                 strncpy(substr, buf+79, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+5] = number / 10.0; */
+
+        /*                 // windspeed_10minaverage */
+        /*                 strncpy(substr, buf+83, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+6] = number / 10.0; */
+
+        /*                 // windspeed_direction */
+        /*                 strncpy(substr, buf+87, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+7] = number; */
+
+        /*                 // precipitation */
+        /*                 strncpy(substr, buf+99, 4); */
+        /*                 substr[4] = '\0'; */
+        /*                 number = (int)strtol(substr, NULL, 16); */
+        /*                 weather[9*timer_cnt+8] = number / 10.0; */
+
+        /*             } */
+        /*         } */
+        /*     } */
+        /* } */
+        /* else */
+        /* { */
+        /*     printf("Error: Get wrong weather data!!!\n"); */
+        /* } */
     }
 
     timer_cnt++;
@@ -381,7 +415,8 @@ void init_buf()
     nchans = 2 * nfeeds;
     nbls = nchans * (nchans + 1) / 2;
     nns = config.nns;
-    nweather = (int) (config.inttime * N_TIME_PER_FILE / config.weatherperiod);
+    double accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    nweather = (int) (accurate_inttime * N_TIME_PER_FILE / config.weatherperiod);
     if (nbls != N_BASELINE)
     {
         printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
@@ -533,13 +568,13 @@ void gen_obs_log()
 void gen_datafile(const char *data_path)
 {
     double accurate_inttime, span, start_offset, end_offset;
-    time_t t;
-    struct tm tm;
-    char cur_time[20];
-    char settime_cmd[50];
-    char *time_fmt;
-    int len;
-    char buf[BUFSIZ];  // buffer for receiving
+    // time_t t;
+    // struct tm tm;
+    // char cur_time[20];
+    // char settime_cmd[50];
+    // char *time_fmt;
+    // int len;
+    // char buf[BUFSIZ];  // buffer for receiving
     char *obs_time;
     double sec1970;
     char *stime, *etime;
@@ -547,33 +582,33 @@ void gen_datafile(const char *data_path)
     char file_name[35];
     char file_path[150];
     PyObject *pObj = NULL;
-    hid_t space, dset, dcpl, dsettype, mtype;    /* Handles */
+    hid_t space, dset, dcpl; // dsettype, mtype;    /* Handles */
     herr_t status;
 
-    accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9 // integration time, Unit: second
+    accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
 
-    // calibrate the device time of the weather station
-    if (conn_status == 0) // while successfully connected to the weather station
-    {
-        t = time(NULL);
-        tm = *localtime(&t); // get current local time
-        time_fmt = "%02d%02d%02d%02d%02d%02d%02d";
-        snprintf(cur_time, sizeof(cur_time), time_fmt, tm.tm_sec, tm.tm_min, tm.tm_hour, tm.tm_mday, tm.tm_mon, tm.tm_wday, (tm.tm_year + 1900) % 2000);
-        snprintf(settime_cmd, sizeof(settime_cmd), "%s%s%s%s%s", WS_HEADER, WS_DEVNO, WS_CMDSETTIME, cur_time, WS_SETTAILER);
-        len = send(sockfd, settime_cmd, strlen(settime_cmd), 0);
-        len = recv(sockfd, buf, BUFSIZ, 0); // receive data from weather station
-        if (len == 11)
-        {
-            buf[len] = '\0';
-        }
-        else
-        {
-            printf("Error: Failed to set time!!!\n");
-        }
-    }
+    /* // calibrate the device time of the weather station */
+    /* if (conn_status == 0) // while successfully connected to the weather station */
+    /* { */
+    /*     t = time(NULL); */
+    /*     tm = *localtime(&t); // get current local time */
+    /*     time_fmt = "%02d%02d%02d%02d%02d%02d%02d"; */
+    /*     snprintf(cur_time, sizeof(cur_time), time_fmt, tm.tm_sec, tm.tm_min, tm.tm_hour, tm.tm_mday, tm.tm_mon, tm.tm_wday, (tm.tm_year + 1900) % 2000); */
+    /*     snprintf(settime_cmd, sizeof(settime_cmd), "%s%s%s%s%s", WS_HEADER, WS_DEVNO, WS_CMDSETTIME, cur_time, WS_SETTAILER); */
+    /*     len = send(sockfd, settime_cmd, strlen(settime_cmd), 0); */
+    /*     len = recv(sockfd, buf, BUFSIZ, 0); // receive data from weather station */
+    /*     if (len == 11) */
+    /*     { */
+    /*         buf[len] = '\0'; */
+    /*     } */
+    /*     else */
+    /*     { */
+    /*         printf("Error: Failed to set time!!!\n"); */
+    /*     } */
+    /* } */
 
     // if (file_count == 0)
     //     PyRun_SimpleString("start_timestamp = time.time()");
@@ -583,7 +618,7 @@ void gen_datafile(const char *data_path)
         pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
     }
     // now setup the timer and begin to get weather data
-    if (conn_status == 0) // while successfully connected to the weather station
+    if (weather_exist) // while successfully connected to the weather station
     {
         setitimer(ITIMER_REAL, &new_value, &old_value);
         // initialize timer count to 0
@@ -647,10 +682,9 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
     H5LTset_attribute_int(file_id, "/", "samplingbits", &config.samplingbits, 1);
     H5LTset_attribute_int(file_id, "/", "corrmode", &config.corrmode, 1);
-    double accurate_inttime = (int)(1.0e9*inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9
     H5LTset_attribute_double(file_id, "/", "inttime", &accurate_inttime, 1);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
-    H5LTset_attribute_double(file_id, "/", "sec1970", sec1970);
+    H5LTset_attribute_double(file_id, "/", "sec1970", &sec1970, 1);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
     H5LTset_attribute_double(file_id, "/", "freqstep", &config.freqstep, 1);
@@ -735,8 +769,8 @@ void gen_datafile(const char *data_path)
 
     // pointingtime
     // Create dataspace
-    hsize_t antp_dims[3] = {1, 2}; // 1 for Source No.
-    space = H5Screate_simple (2, antp_dims, NULL);
+    hsize_t pt_dims[3] = {1, 2}; // 1 for Source No.
+    space = H5Screate_simple (2, pt_dims, NULL);
     // Create the dataset
     dset = H5Dcreate (file_id, "pointingtime", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
@@ -806,15 +840,14 @@ void gen_datafile(const char *data_path)
     status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
     // Attributes for weather
     H5LTset_attribute_string(file_id, "weather", "dimname", "Weather Data, (Sec1970, RoomTemperature, RoomHumidity, Temperature, Dewpoint, Humidity, Precipitation, WindDirection, WindSpeed, Pressure)");
-    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa;
-Note: WindSpeed is a 2-minute-average value.");
+    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value.");
 
     // Close and release resources.
     status = H5Pclose (dcpl);
     status = H5Dclose (dset);
     status = H5Sclose (space);
-    status = H5Tclose (dsettype);
-    status = H5Tclose (mtype);
+    /* status = H5Tclose (dsettype); */
+    /* status = H5Tclose (mtype); */
 
     file_count++;
 
@@ -834,29 +867,41 @@ void writeData(const char *data_path)
     new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
     new_value.it_interval.tv_usec = 0;
 
-    // create socket and bind it to the weather station
-    struct sockaddr_in remote_addr; // IP address
-    memset(&remote_addr, 0, sizeof(remote_addr)); // initialize to 0
-    remote_addr.sin_family = AF_INET; // set to communicate via IP
-    remote_addr.sin_addr.s_addr = inet_addr(WS_REMOTE_IP); // set IP address
-    remote_addr.sin_port = htons(WS_REMOTE_PORT); // IP port
-    // create socket use IPv4 TCP protocol
-    if((sockfd = socket(PF_INET , SOCK_STREAM , 0)) < 0)
+    // check if weather data file exits
+    getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, WEATHER_PATH);
+    if( access(weather_file, F_OK) == -1 )
     {
-        perror("Socket");
-        printf("Error: Weather data will not get");
+        printf("Error: Weather data file does not exist, so weather data will not get");
     }
     else
     {
-        // connect to the weather station
-        if((conn_status = connect(sockfd, (struct sockaddr *)&remote_addr, sizeof(struct sockaddr))) < 0)
-        {
-            char err_str[200];
-            snprintf(err_str, sizeof(err_str), "Connect to IP %s", WS_REMOTE_IP);
-            perror(err_str);
-            printf("Error: Weather data will not get");
-        }
+        weather_exist = 1;
     }
+
+    /* // create socket and bind it to the weather station */
+    /* struct sockaddr_in remote_addr; // IP address */
+    /* memset(&remote_addr, 0, sizeof(remote_addr)); // initialize to 0 */
+    /* remote_addr.sin_family = AF_INET; // set to communicate via IP */
+    /* remote_addr.sin_addr.s_addr = inet_addr(WS_REMOTE_IP); // set IP address */
+    /* remote_addr.sin_port = htons(WS_REMOTE_PORT); // IP port */
+    /* // create socket use IPv4 TCP protocol */
+    /* if((sockfd = socket(PF_INET , SOCK_STREAM , 0)) < 0) */
+    /* { */
+    /*     perror("Socket"); */
+    /*     printf("Error: Weather data will not get"); */
+    /* } */
+    /* else */
+    /* { */
+    /*     // connect to the weather station */
+    /*     if((conn_status = connect(sockfd, (struct sockaddr *)&remote_addr, sizeof(struct sockaddr))) < 0) */
+    /*     { */
+    /*         char err_str[200]; */
+    /*         snprintf(err_str, sizeof(err_str), "Connect to IP %s", WS_REMOTE_IP); */
+    /*         perror(err_str); */
+    /*         printf("Error: Weather data will not get"); */
+    /*     } */
+    /* } */
 
     // pre-generate data file for data storage
     gen_datafile(data_path);
@@ -878,7 +923,7 @@ void writeData(const char *data_path)
                 buf_cnt = 0;
 
                 // kill the timer
-                if (conn_status == 0) // while successfully connected to the weather station
+                if (weather_exist == 0) // while successfully connected to the weather station
                 {
                     alarm(0);
                 }
@@ -928,7 +973,7 @@ void writeData(const char *data_path)
                 buf_cnt = 0;
 
                 // kill the timer
-                if (conn_status == 0) // while successfully connected to the weather station
+                if (weather_exist == 0) // while successfully connected to the weather station
                 {
                     alarm(0);
                 }
@@ -976,8 +1021,8 @@ void writeData(const char *data_path)
             status = H5Tclose (filetype);
             status = H5Fclose (file_id);
 
-            if (sockfd == 0)
-                close(sockfd);
+            /* if (sockfd == 0) */
+            /*     close(sockfd); */
 
             break;
         }
