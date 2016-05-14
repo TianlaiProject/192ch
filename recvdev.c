@@ -453,8 +453,8 @@ void init_buf()
     pointingtime = (float *)malloc( sizeof(float)*2 );
     for (i=0; i<2; i++)
     {
-        pointingtime[0] = 0.0; // should be correct start time in seconds since epoch  1970
-        pointingtime[1] = 0.0; // should be correct end time in seconds since epoch  1970
+        pointingtime[0] = 0.0; // fill the correct value when saving the data set to file
+        pointingtime[1] = -1.0; // negative means the end observation time
     }
 
     // polerr
@@ -541,6 +541,7 @@ void gen_datafile(const char *data_path)
     int len;
     char buf[BUFSIZ];  // buffer for receiving
     char *obs_time;
+    double sec1970;
     char *stime, *etime;
     char tmp_str[150];
     char file_name[35];
@@ -585,7 +586,7 @@ void gen_datafile(const char *data_path)
     if (conn_status == 0) // while successfully connected to the weather station
     {
         setitimer(ITIMER_REAL, &new_value, &old_value);
-        // initalize timer count to 0
+        // initialize timer count to 0
         timer_cnt = 0;
     }
     // start and end time for this hdf5 file
@@ -597,6 +598,7 @@ void gen_datafile(const char *data_path)
     PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
     // get value from python, better to have error checking
     obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
+    sec1970 = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
     PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % (stime.year, stime.month, stime.day, stime.hour, stime.minute, stime.second)");
     stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
     PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % (etime.year, etime.month, etime.day, etime.hour, etime.minute, etime.second)");
@@ -648,6 +650,7 @@ void gen_datafile(const char *data_path)
     double accurate_inttime = (int)(1.0e9*inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9
     H5LTset_attribute_double(file_id, "/", "inttime", &accurate_inttime, 1);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
+    H5LTset_attribute_double(file_id, "/", "sec1970", sec1970);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
     H5LTset_attribute_double(file_id, "/", "freqstep", &config.freqstep, 1);
@@ -737,6 +740,7 @@ void gen_datafile(const char *data_path)
     // Create the dataset
     dset = H5Dcreate (file_id, "pointingtime", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
+    pointingtime[0] = sec1970; // fill the correct start time here before saving
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, pointingtime);
     // Attributes for antpointing
     H5LTset_attribute_string(file_id, "pointingtime", "dimname", "Source No., (starttime,endtime)");
@@ -1034,7 +1038,7 @@ void recvData(const char *data_path)
                 {
                     pkt_id = 0;
                     // use this time as the data receiving start time (may need more accurate start time, but how to get?)
-                    PyRun_SimpleString("start_timestamp = time.time()");
+                    PyRun_SimpleString("start_timestamp = time.time()"); // Seconds since epoch 1970 Jan. 1st
                     break;
                 }
             }
