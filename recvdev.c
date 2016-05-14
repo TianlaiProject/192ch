@@ -76,10 +76,12 @@ typedef struct
     const char* comment;
     const char* observer;
     int nns;
+    // const char* nsstart;
+    // const char* nsstop;
     // const char* nscycle;
-    // const char* nsduration;
+    char* nsstart;
+    char* nsstop;
     char* nscycle;
-    char* nsduration;
     double inttime;
     double weatherperiod;
     const char* keywordver;
@@ -131,8 +133,8 @@ int sockfd = -1;
 int conn_status = -1;
 int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
-float *feedpos, *antpointing, *polerr, *noisesource, *weather;
-const char *transitsource[] = {"", ""}; // no transit source for cylinder array
+float *feedpos, *antpointing, *pointingtime, *polerr, *noisesource, *weather;
+const float *transitsource[] = {}; // no transit source for cylinder array
 
 unsigned char * buf01;
 unsigned char * buf02;
@@ -362,12 +364,12 @@ void create_data_path(const char *data_path)
 void init_buf()
 {
     int i;
-    char data_dir[1024], feedpos_dir[1024], blorder_dir[1024];
+    char data_dir[1024], feedpos_dir[1024], blorder_dir[1024], nspos_dir[1024];
     FILE *data_file;
 
     // allocate and initialize data receiving buffers
-    buf01=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
-    buf02=(unsigned char *)malloc( sizeof(unsigned char)*buflen );
+    buf01 = (unsigned char *)malloc( sizeof(unsigned char)*buflen );
+    buf02 = (unsigned char *)malloc( sizeof(unsigned char)*buflen );
     for (i=0; i<buflen; i++)
     {
         buf01[i] = 0xFF;
@@ -389,18 +391,23 @@ void init_buf()
     getcwd(data_dir, sizeof(data_dir));
     strcat(data_dir, "/data");
 
-    /* allocate and fill weather related buffers */
-    feedno=(int *)malloc( sizeof(int)*nfeeds );
+    /* allocate and fill buffers */
+    // feedno
+    feedno = (int *)malloc( sizeof(int)*nfeeds );
     for (i=0; i<nfeeds; i++)
     {
         feedno[i] = i + 1;
     }
-    channo=(int *)malloc( sizeof(int)*nchans );
+
+    // channo
+    channo = (int *)malloc( sizeof(int)*nchans );
     for (i=0; i<nchans; i++)
     {
         channo[i] = i + 1;
     }
-    blorder=(int *)malloc( sizeof(int)*2*nbls );
+
+    // blorder
+    blorder = (int *)malloc( sizeof(int)*2*nbls );
     strcpy(blorder_dir, data_dir);
     strcat(blorder_dir, "/blorder.dat");
     data_file = fopen(blorder_dir, "r");
@@ -414,7 +421,9 @@ void init_buf()
         fscanf(data_file, "%d", &blorder[i] );
     }
     fclose(data_file);
-    feedpos=(float *)malloc( sizeof(float)*3*nfeeds );
+
+    // feedpos
+    feedpos = (float *)malloc( sizeof(float)*3*nfeeds );
     strcpy(feedpos_dir, data_dir);
     strcat(feedpos_dir, "/feedpos.dat");
     data_file = fopen(feedpos_dir, "r");
@@ -428,7 +437,9 @@ void init_buf()
         fscanf(data_file, "%f", &feedpos[i] );
     }
     fclose(data_file);
-    antpointing=(float *)malloc( sizeof(float)*4*nfeeds );
+
+    // antpointing
+    antpointing = (float *)malloc( sizeof(float)*4*nfeeds );
     for (i=0; i<nfeeds; i++)
     {
         antpointing[4*i] = 0.0;
@@ -436,29 +447,63 @@ void init_buf()
         antpointing[4*i+2] = 0.0; // should be correct AzErr
         antpointing[4*i+3] = 0.0; // should be correct AltErr
     }
-    polerr=(float *)malloc( sizeof(float)*2*nfeeds );
+
+    // pointingtime
+    pointingtime = (float *)malloc( sizeof(float)*2 );
+    for (i=0; i<2; i++)
+    {
+        pointingtime[0] = 0.0; // should be correct start time in seconds since epoch  1970
+        pointingtime[1] = 0.0; // should be correct end time in seconds since epoch  1970
+    }
+
+    // polerr
+    polerr = (float *)malloc( sizeof(float)*2*nfeeds );
     for (i=0; i<2*nfeeds; i++)
     {
         // should be the correct pol err
         polerr[i] = 0.0;
     }
-    noisesource=(float *)malloc( sizeof(float)*2*nns );
-    float cycle, duration;
-    char *p1=config.nscycle;
-    char *p2=config.nsduration;
+
+    // nspos
+    nspos = (float *)malloc( sizeof(float)*3*nns );
+    strcpy(nspos_dir, data_dir);
+    strcat(nspos_dir, "/nspos.dat");
+    data_file = fopen(nspos_dir, "r");
+    if (data_file == NULL)
+    {
+        printf("Error: Fail to open file %s\n", nspos_dir);
+        exit (-1);
+    }
+    for (i=0; i<3*nns; i++)
+    {
+        fscanf(data_file, "%f", &nspos[i] );
+    }
+    fclose(data_file);
+
+    // noisesource
+    noisesource = (float *)malloc( sizeof(float)*3*nns );
+    float start, stop, cycle;
+    char *p1=config.nsstart;
+    char *p2=config.nsstop;
+    char *p3=config.nscycle;
     for (i=0; i<nns; i++)
     {
         // better to have some error checking
-        cycle = strtod(p1, &p1);
-        noisesource[2*i] = cycle;
+        start = strtod(p1, &p1);
+        noisesource[2*i] = start;
 
-        duration = strtod(p2, &p2);
-        noisesource[2*i+1] = duration;
+        stop = strtod(p2, &p2);
+        noisesource[2*i+1] = stop;
+
+        cycle = strtod(p3, &p3);
+        noisesource[2*i+2] = cycle;
     }
-    weather=(float *)malloc( sizeof(float)*9*nweather );
+
+    //weather
+    weather = (float *)malloc( sizeof(float)*10*nweather );
     // initialize weather data to nan
     u_char *uc = (u_char *)weather;
-    for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
+    for (i=0; i<10*nweather*sizeof(float)/sizeof(u_char); i++)
     {
         uc[i] = 0xFF;
     }
@@ -588,6 +633,7 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_double(file_id, "/", "dishdiam", &config.dishdiam, 1);
     H5LTset_attribute_int(file_id, "/", "nants", &config.nants, 1);
     H5LTset_attribute_int(file_id, "/", "npols", &config.npols, 1);
+    H5LTset_attribute_int(file_id, "/", "nfeeds", &config.nfeeds, 1);
     H5LTset_attribute_double(file_id, "/", "cylen", &config.cylen, 1);
     H5LTset_attribute_double(file_id, "/", "cywid", &config.cywid, 1);
     // Type D: Receiver
@@ -597,7 +643,8 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
     H5LTset_attribute_int(file_id, "/", "samplingbits", &config.samplingbits, 1);
     H5LTset_attribute_int(file_id, "/", "corrmode", &config.corrmode, 1);
-    H5LTset_attribute_double(file_id, "/", "inttime", &config.inttime, 1);
+    double accurate_inttime = (int)(1.0e9*inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9
+    H5LTset_attribute_double(file_id, "/", "inttime", &accurate_inttime, 1);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
     H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
@@ -644,6 +691,7 @@ void gen_datafile(const char *data_path)
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, channo);
     // Attributes for channo
     H5LTset_attribute_string(file_id, "channo", "dimname", "Feed No., (XPolarization YPolarization)");
+    // attribute badchn, how to?
 
     // blorder
     // Create dataspace
@@ -670,15 +718,27 @@ void gen_datafile(const char *data_path)
 
     // antpointing
     // Create dataspace
-    hsize_t antp_dims[2] = {nfeeds, 4};
-    space = H5Screate_simple (2, antp_dims, NULL);
+    hsize_t antp_dims[3] = {1, nfeeds, 4}; // 1 for Source No.
+    space = H5Screate_simple (3, antp_dims, NULL);
     // Create the dataset
     dset = H5Dcreate (file_id, "antpointing", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, antpointing);
     // Attributes for antpointing
-    H5LTset_attribute_string(file_id, "antpointing", "dimname", "Feed No., (Az,Alt,AzErr,AltErr)");
+    H5LTset_attribute_string(file_id, "antpointing", "dimname", "Source No., Feed No., (Az, Alt, AzErr, AltErr)");
     H5LTset_attribute_string(file_id, "antpointing", "unit", "degree");
+
+    // pointingtime
+    // Create dataspace
+    hsize_t antp_dims[3] = {1, 2}; // 1 for Source No.
+    space = H5Screate_simple (2, antp_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "pointingtime", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, pointingtime);
+    // Attributes for antpointing
+    H5LTset_attribute_string(file_id, "pointingtime", "dimname", "Source No., (starttime,endtime)");
+    H5LTset_attribute_string(file_id, "pointingtime", "unit", "second");
 
     // polerr
     // Create dataspace
@@ -689,40 +749,49 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, polerr);
     // Attributes for polerr
-    H5LTset_attribute_string(file_id, "polerr", "dimname", "Feed No., (XPolErr,YPolErr)");
+    H5LTset_attribute_string(file_id, "polerr", "dimname", "Feed No., (XPolErr, YPolErr)");
     H5LTset_attribute_string(file_id, "polerr", "unit", "degree");
+
+    // nspos
+    // Create dataspace
+    hsize_t nspos_dims[2] = {nns, 3};
+    space = H5Screate_simple (2, nspos_dims, NULL);
+    // Create the dataset
+    dset = H5Dcreate (file_id, "nspos", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
+    // Write the data to the dataset
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, nspos);
+    // Attributes for feedpos
+    H5LTset_attribute_string(file_id, "nspos", "dimname", "NoiseSource No., (X,Y,Z) coordinate");
+    H5LTset_attribute_string(file_id, "nspos", "unit", "meter");
 
     // noisesource
     // Create dataspace
-    hsize_t ns_dims[2] = {nns, 2};
+    hsize_t ns_dims[2] = {nns, 3};
     space = H5Screate_simple (2, ns_dims, NULL);
     // Create the dataset
     dset = H5Dcreate (file_id, "noisesource", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, noisesource);
     // Attributes for noisesource
-    H5LTset_attribute_string(file_id, "noisesource", "dimname", "Source No., (Cycle Duration)");
+    H5LTset_attribute_string(file_id, "noisesource", "dimname", "NoiseSource No., (Start, Stop, Cycle)");
     H5LTset_attribute_string(file_id, "noisesource", "unit", "second");
 
     // transitsource
-    // Create file and memory datatypes, save the strings as FORTRAN strings.
-    dsettype = H5Tcopy (H5T_FORTRAN_S1);
-    status = H5Tset_size (dsettype, H5T_VARIABLE);
-    mtype = H5Tcopy (H5T_C_S1);
-    status = H5Tset_size (mtype, H5T_VARIABLE);
     // Create dataspace
-    hsize_t ts_dims[2] = {1, 2};
+    hsize_t ts_dims[2] = {0, 5};
     space = H5Screate_simple (2, ts_dims, NULL);
     // Create the dataset
-    dset = H5Dcreate (file_id, "transitsource", dsettype, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    dset = H5Dcreate (file_id, "transitsource", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
-    status = H5Dwrite (dset, mtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, transitsource);
-    // Attributes for transitsource
-    H5LTset_attribute_string(file_id, "transitsource", "dimname", "Source, (DateTime, SourceName)");
+    status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, transitsource);
+    // Attributes for feedpos
+    H5LTset_attribute_string(file_id, "transitsource", "dimname", "Source, (time, SourceRA, SourceDec, SourceAz, SourceAlt)");
+    H5LTset_attribute_string(file_id, "transitsource", "unit", "(second, degree, degree, degree, degree)");
+    H5LTset_attribute_string(file_id, "transitsource", "srcname", "None");
 
     // weather
     // Create dataspace
-    hsize_t weather_dims[2] = {nweather, 9};
+    hsize_t weather_dims[2] = {nweather, 10};
     space = H5Screate_simple (2, weather_dims, NULL);
     // Create the dataset
     weather_dset = H5Dcreate (file_id, "weather", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
@@ -730,8 +799,9 @@ void gen_datafile(const char *data_path)
     // NOTE: here we write the initial weather buffer to this data set, but the weather buffer haven't filled by the real weather data yet, we will fill it before the close of the hdf5 file
     status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
     // Attributes for weather
-    H5LTset_attribute_string(file_id, "weather", "dimname", "Weather Data,(TimeOffset, RoomTemperature, SiteTemperature, Dewpoint, Humidity, Precipitation, WindDirection, WindSpeed, Pressure)");
-    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, Celcius, Celcius, %, millimeter, degree, m/s, mmHg");
+    H5LTset_attribute_string(file_id, "weather", "dimname", "Weather Data, (Sec1970, RoomTemperature, RoomHumidity, Temperature, Dewpoint, Humidity, Precipitation, WindDirection, WindSpeed, Pressure)");
+    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa;
+Note: WindSpeed is a 2-minute-average value.");
 
     // Close and release resources.
     status = H5Pclose (dcpl);
@@ -1199,10 +1269,12 @@ static int handler(void* config, const char* section, const char* name,
         pconfig->observer = strdup(value);
     } else if (MATCH("change", "nns")) {
         pconfig->nns = atoi(value);
+    } else if (MATCH("change", "nsstart")) {
+        pconfig->nsstart = strdup(value);
+    } else if (MATCH("change", "nsstop")) {
+        pconfig->nsstop = strdup(value);
     } else if (MATCH("change", "nscycle")) {
         pconfig->nscycle = strdup(value);
-    } else if (MATCH("change", "nsduration")) {
-        pconfig->nsduration = strdup(value);
     } else if (MATCH("fix", "inttime")) {
         pconfig->inttime = atof(value);
     } else if (MATCH("fix", "weatherperiod")) {
