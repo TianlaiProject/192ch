@@ -4,4 +4,7 @@
 - error checking
 - properly exit program when error occurs
 - eliminate and reuse some redundant code
+- save badchn attribute, but how to?
+- check weather data update
+- pointing endtime, how to?
 - ...
