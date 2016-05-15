@@ -526,13 +526,13 @@ void init_buf()
     {
         // better to have some error checking
         start = strtod(p1, &p1);
-        noisesource[2*i] = start;
+        noisesource[3*i] = start;
 
         stop = strtod(p2, &p2);
-        noisesource[2*i+1] = stop;
+        noisesource[3*i+1] = stop;
 
         cycle = strtod(p3, &p3);
-        noisesource[2*i+2] = cycle;
+        noisesource[3*i+2] = cycle;
     }
 
     //weather
@@ -555,7 +555,10 @@ void free_buf()
     free(channo);
     free(blorder);
     free(feedpos);
+    free(antpointing);
+    free(pointingtime);
     free(polerr);
+    free(nspos);
     free(noisesource);
     free(weather);
 }
@@ -563,6 +566,7 @@ void free_buf()
 
 void gen_obs_log()
 {
+    printf("%s", "Generate observation log function not implemented yet!!!");
 }
 
 void gen_datafile(const char *data_path)
@@ -618,14 +622,15 @@ void gen_datafile(const char *data_path)
         pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
     }
     // now setup the timer and begin to get weather data
-    if (weather_exist) // while successfully connected to the weather station
+    if (weather_exist) // while weather data file exists
     {
         setitimer(ITIMER_REAL, &new_value, &old_value);
         // initialize timer count to 0
         timer_cnt = 0;
     }
     // start and end time for this hdf5 file
-    PyRun_SimpleString("start_time = datetime.datetime.fromtimestamp(start_timestamp)");
+    if (file_count == 0)
+        PyRun_SimpleString("start_time = datetime.datetime.fromtimestamp(start_timestamp)");
     snprintf(tmp_str, sizeof(tmp_str), "stime = start_time + datetime.timedelta(seconds=%f)", start_offset);
     PyRun_SimpleString(tmp_str);
     snprintf(tmp_str, sizeof(tmp_str), "etime = start_time + datetime.timedelta(seconds=%f)", end_offset);
@@ -633,7 +638,7 @@ void gen_datafile(const char *data_path)
     PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
     // get value from python, better to have error checking
     obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
-    sec1970 = PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
+    sec1970 = start_offset + PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
     PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % (stime.year, stime.month, stime.day, stime.hour, stime.minute, stime.second)");
     stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
     PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % (etime.year, etime.month, etime.day, etime.hour, etime.minute, etime.second)");
@@ -648,6 +653,7 @@ void gen_datafile(const char *data_path)
     // data file name
     snprintf(file_name, sizeof(file_name), "%s_%s.hdf5", stime, etime);
     strcpy(file_path, data_path);
+    strcat(file_path, "/");
     strcat(file_path, file_name);
 
     // Create a new hdf5 file using the default properties.
@@ -818,7 +824,7 @@ void gen_datafile(const char *data_path)
 
     // transitsource
     // Create dataspace
-    hsize_t ts_dims[2] = {0, 5};
+    hsize_t ts_dims[2] = {0, 5}; // no transit source for cylinder array
     space = H5Screate_simple (2, ts_dims, NULL);
     // Create the dataset
     dset = H5Dcreate (file_id, "transitsource", H5T_IEEE_F32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
@@ -869,10 +875,11 @@ void writeData(const char *data_path)
 
     // check if weather data file exits
     getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, "/");
     strcat(weather_file, WEATHER_PATH);
     if( access(weather_file, F_OK) == -1 )
     {
-        printf("Error: Weather data file does not exist, so weather data will not get");
+        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
     }
     else
     {
@@ -923,7 +930,7 @@ void writeData(const char *data_path)
                 buf_cnt = 0;
 
                 // kill the timer
-                if (weather_exist == 0) // while successfully connected to the weather station
+                if (weather_exist == 0) // while weather data file exists
                 {
                     alarm(0);
                 }
@@ -973,7 +980,7 @@ void writeData(const char *data_path)
                 buf_cnt = 0;
 
                 // kill the timer
-                if (weather_exist == 0) // while successfully connected to the weather station
+                if (weather_exist == 0) // while weather data file exists
                 {
                     alarm(0);
                 }
@@ -1061,7 +1068,7 @@ void recvData(const char *data_path)
     bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
 
     strcpy(log_path, data_path);
-    strcat(log_path, "recv_data.log");
+    strcat(log_path, "/recv_data.log");
     fp = fopen(log_path, "wb");
 
     printf("Begin to receive data ... \n");
