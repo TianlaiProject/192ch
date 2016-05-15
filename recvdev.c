@@ -621,13 +621,7 @@ void gen_datafile(const char *data_path)
     {
         pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
     }
-    // now setup the timer and begin to get weather data
-    if (weather_exist) // while weather data file exists
-    {
-        setitimer(ITIMER_REAL, &new_value, &old_value);
-        // initialize timer count to 0
-        timer_cnt = 0;
-    }
+
     // start and end time for this hdf5 file
     if (file_count == 0)
         PyRun_SimpleString("start_time = datetime.datetime.fromtimestamp(start_timestamp)");
@@ -867,25 +861,6 @@ void writeData(const char *data_path)
     herr_t     status;
     hid_t      sub_dataspace_id;
 
-    // set timer period
-    new_value.it_value.tv_sec = 0;
-    new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
-    new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
-    new_value.it_interval.tv_usec = 0;
-
-    // check if weather data file exits
-    getcwd(weather_file, sizeof(weather_file));
-    strcat(weather_file, "/");
-    strcat(weather_file, WEATHER_PATH);
-    if( access(weather_file, F_OK) == -1 )
-    {
-        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
-    }
-    else
-    {
-        weather_exist = 1;
-    }
-
     /* // create socket and bind it to the weather station */
     /* struct sockaddr_in remote_addr; // IP address */
     /* memset(&remote_addr, 0, sizeof(remote_addr)); // initialize to 0 */
@@ -929,10 +904,10 @@ void writeData(const char *data_path)
             {
                 buf_cnt = 0;
 
-                // kill the timer
                 if (weather_exist == 0) // while weather data file exists
                 {
-                    alarm(0);
+                    // alarm(0); // kill the timer
+                    timer_cnt = 0; // not kill timer, but reset timer counter
                 }
 
                 // Write weather data to the dataset before file close
@@ -979,10 +954,10 @@ void writeData(const char *data_path)
             {
                 buf_cnt = 0;
 
-                // kill the timer
                 if (weather_exist == 0) // while weather data file exists
                 {
-                    alarm(0);
+                    // alarm(0); // kill the timer
+                    timer_cnt = 0; // not kill timer, but reset timer counter
                 }
 
                 // Write weather data to the dataset before file close
@@ -1056,6 +1031,30 @@ void recvData(const char *data_path)
     struct ifreq ifr;
     FILE *fp;
 
+    // open log file
+    strcpy(log_path, data_path);
+    strcat(log_path, "/recv_data.log");
+    fp = fopen(log_path, "wb");
+
+    // check if weather data file exits
+    getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, "/");
+    strcat(weather_file, WEATHER_PATH);
+    if( access(weather_file, F_OK) == -1 )
+    {
+        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+    }
+    else
+    {
+        weather_exist = 1;
+
+        // set timer period
+        new_value.it_value.tv_sec = 0;
+        new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
+        new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
+        new_value.it_interval.tv_usec = 0;
+    }
+
     // initialize network related things
     recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     bzero(&sll, sizeof(sll));
@@ -1066,10 +1065,6 @@ void recvData(const char *data_path)
     sll.sll_protocol = htons(ETH_P_ALL);
     sll.sll_ifindex  = ifr.ifr_ifindex;
     bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
-
-    strcpy(log_path, data_path);
-    strcat(log_path, "/recv_data.log");
-    fp = fopen(log_path, "wb");
 
     printf("Begin to receive data ... \n");
     fflush(stdout);
@@ -1089,8 +1084,18 @@ void recvData(const char *data_path)
                 if (init_cnt != old_cnt)
                 {
                     pkt_id = 0;
+
                     // use this time as the data receiving start time (may need more accurate start time, but how to get?)
                     PyRun_SimpleString("start_timestamp = time.time()"); // Seconds since epoch 1970 Jan. 1st
+
+                    // now setup the timer and begin to get weather data
+                    if (weather_exist) // while weather data file exists
+                    {
+                        setitimer(ITIMER_REAL, &new_value, &old_value);
+                        // initialize timer count to 0
+                        timer_cnt = 0;
+                    }
+
                     break;
                 }
             }
