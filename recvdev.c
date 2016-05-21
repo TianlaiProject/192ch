@@ -420,7 +420,7 @@ void gen_datafile(const char *data_path)
     hid_t space, dset, dcpl; /* Handles */
     herr_t status;
 
-    accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
