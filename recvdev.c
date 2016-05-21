@@ -117,7 +117,7 @@ hsize_t block[3] = {1, 1, 1}; /* subset block in the file */
 
 int buf_cnt = 0;
 int file_count = 0;
-
+int pkt_id = -1; // jx
 int weather_exist = 0;
 char weather_file[1024];
 struct itimerval new_value, old_value; // for timer use
@@ -253,7 +253,7 @@ void init_buf()
     nchans = 2 * nfeeds;
     nbls = nchans * (nchans + 1) / 2;
     nns = config.nns;
-    double accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    double accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     nweather = (int) (accurate_inttime * N_TIME_PER_FILE / config.weatherperiod);
     if (nbls != N_BASELINE)
     {
@@ -428,6 +428,8 @@ void gen_datafile(const char *data_path)
     // if (file_count == 0)
     //     PyRun_SimpleString("start_timestamp = time.time()");
     // wait until start_time has been set, that is we have began to receive data
+    while (pkt_id == -1)
+        ;
     while (pObj == NULL)
     {
         pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
@@ -519,7 +521,9 @@ void gen_datafile(const char *data_path)
     // for other datasets
     // Create the dataset creation property list, set the layout to compact.
     dcpl = H5Pcreate (H5P_DATASET_CREATE);
-    status = H5Pset_layout (dcpl, H5D_COMPACT);
+    // debug ycli
+    //status = H5Pset_layout (dcpl, H5D_COMPACT);
+    status = H5Pset_layout (dcpl, H5D_CONTIGUOUS);
 
     // feedno
     // Create dataspace
@@ -799,7 +803,8 @@ void recvData(const char *data_path)
     char log_path[150];
     register int packet_len ;
     register int row = 0;
-    register int init_cnt, current_cnt, freq_ind, pkt_id, pkt_id_old=-1;
+    register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
+    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
     register long row_size = 8 * N_BASELINE;
     u_char frame_buff[BUFSIZE];
@@ -858,17 +863,20 @@ void recvData(const char *data_path)
         if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
         {
             if (i == 0)
+            {
                 old_cnt = *(int *)(frame_buff_p + 22);
+                i=1;
+            }
             else
             {
                 init_cnt = *(int *)(frame_buff_p + 22);
                 // find where time count changes as the starting point to receive data to buffer
                 if (init_cnt != old_cnt)
                 {
-                    pkt_id = 0;
 
                     // use this time as the data receiving start time (may need more accurate start time, but how to get?)
                     PyRun_SimpleString("start_timestamp = time.time()"); // Seconds since epoch 1970 Jan. 1st
+                    pkt_id = 0;
 
                     // now setup the timer and begin to get weather data
                     if (weather_exist) // while weather data file exists
@@ -881,7 +889,6 @@ void recvData(const char *data_path)
                     break;
                 }
             }
-            i++;
         }
     }
 
