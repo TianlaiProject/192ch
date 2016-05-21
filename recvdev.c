@@ -73,31 +73,31 @@ typedef struct
     char* nsstart;
     char* nsstop;
     char* nscycle;
-    double inttime;
-    double weatherperiod;
+    float inttime;
+    float weatherperiod;
     const char* keywordver;
     const char* recvver;
     const char* corrver;
     const char* telescope;
     const char* history;
     const char* sitename;
-    double sitelat;
-    double sitelon;
-    double siteelev;
+    float sitelat;
+    float sitelon;
+    float siteelev;
     const char* timezone;
     const char* epoch;
-    double dishdiam;
+    float dishdiam;
     int nants;
     int nfeeds;
     int npols;
-    double cylen;
-    double cywid;
-    double lofreq;
+    float cylen;
+    float cywid;
+    float lofreq;
     int samplingbits;
     int corrmode;
     int nfreq;
-    double freqstart;
-    double freqstep;
+    float freqstart;
+    float freqstep;
 } configuration;
 
 
@@ -122,6 +122,7 @@ int weather_exist = 0;
 char weather_file[1024];
 struct itimerval new_value, old_value; // for timer use
 int timer_cnt = 0;
+double accurate_inttime; // integration time, Unit: second
 int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
 float *feedpos, *antpointing, *pointingtime, *polerr, *nspos, *noisesource, *weather;
@@ -253,7 +254,7 @@ void init_buf()
     nchans = 2 * nfeeds;
     nbls = nchans * (nchans + 1) / 2;
     nns = config.nns;
-    double accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     nweather = (int) (accurate_inttime * N_TIME_PER_FILE / config.weatherperiod);
     if (nbls != N_BASELINE)
     {
@@ -409,18 +410,20 @@ void gen_obs_log()
 
 void gen_datafile(const char *data_path)
 {
-    double accurate_inttime, span, start_offset, end_offset;
+    double span, start_offset, end_offset;
     char *obs_time;
     double sec1970;
     char *stime, *etime;
     char tmp_str[150];
     char file_name[35];
     char file_path[150];
-    PyObject *pObj = NULL;
+    // PyObject *pObj = NULL;
+    hsize_t attr_dims[] = {};
+    hid_t attr_space, attr_id;
     hid_t space, dset, dcpl; /* Handles */
     herr_t status;
 
-    accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    // accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
@@ -430,10 +433,10 @@ void gen_datafile(const char *data_path)
     // wait until start_time has been set, that is we have began to receive data
     while (pkt_id == -1)
         ;
-    while (pObj == NULL)
-    {
-        pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
-    }
+    /* while (pObj == NULL) */
+    /* { */
+    /*     pObj = PyMapping_GetItemString(pMainDict, "start_timestamp"); */
+    /* } */
 
     // start and end time for this hdf5 file
     if (file_count == 0)
@@ -466,6 +469,9 @@ void gen_datafile(const char *data_path)
     // Create a new hdf5 file using the default properties.
     file_id = H5Fcreate (file_path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
+    // Create a 0 dimension space for scalar attributes
+    attr_space = H5Screate_simple (0, attr_dims, NULL);
+
     // Create attributes
     // Type A: Common
     H5LTset_attribute_string(file_id, "/", "nickname", config.nickname);
@@ -475,32 +481,49 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "/", "keywordver", config.keywordver);
     // Type B: Site
     H5LTset_attribute_string(file_id, "/", "sitename", config.sitename);
-    H5LTset_attribute_double(file_id, "/", "sitelat", &config.sitelat, 1);
-    H5LTset_attribute_double(file_id, "/", "sitelon", &config.sitelon, 1);
-    H5LTset_attribute_double(file_id, "/", "siteelev", &config.siteelev, 1);
+    attr_id = H5Acreate2(file_id, "sitelat", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelat);
+    attr_id = H5Acreate2(file_id, "sitelon", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelon);
+    attr_id = H5Acreate2(file_id, "siteelev", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.siteelev);
     H5LTset_attribute_string(file_id, "/", "timezone", config.timezone);
     H5LTset_attribute_string(file_id, "/", "epoch", config.epoch);
     // Type C: Antenna
     H5LTset_attribute_string(file_id, "/", "telescope", config.telescope);
-    H5LTset_attribute_double(file_id, "/", "dishdiam", &config.dishdiam, 1);
-    H5LTset_attribute_int(file_id, "/", "nants", &config.nants, 1);
-    H5LTset_attribute_int(file_id, "/", "npols", &config.npols, 1);
-    H5LTset_attribute_int(file_id, "/", "nfeeds", &config.nfeeds, 1);
-    H5LTset_attribute_double(file_id, "/", "cylen", &config.cylen, 1);
-    H5LTset_attribute_double(file_id, "/", "cywid", &config.cywid, 1);
+    attr_id = H5Acreate2(file_id, "dishdiam", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.dishdiam);
+    attr_id = H5Acreate2(file_id, "nants", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nants);
+    attr_id = H5Acreate2(file_id, "npols", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.npols);
+    attr_id = H5Acreate2(file_id, "nfeeds", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfeeds);
+    attr_id = H5Acreate2(file_id, "cylen", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cylen);
+    attr_id = H5Acreate2(file_id, "cywid", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cywid);
     // Type D: Receiver
     H5LTset_attribute_string(file_id, "/", "recvver", config.recvver);
-    H5LTset_attribute_double(file_id, "/", "lofreq", &config.lofreq, 1);
+    attr_id = H5Acreate2(file_id, "lofreq", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.lofreq);
     // Type E: Correlator
     H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
-    H5LTset_attribute_int(file_id, "/", "samplingbits", &config.samplingbits, 1);
-    H5LTset_attribute_int(file_id, "/", "corrmode", &config.corrmode, 1);
-    H5LTset_attribute_double(file_id, "/", "inttime", &accurate_inttime, 1);
+    attr_id = H5Acreate2(file_id, "samplingbits", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.samplingbits);
+    attr_id = H5Acreate2(file_id, "corrmode", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.corrmode);
+    attr_id = H5Acreate2(file_id, "inttime", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &accurate_inttime);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
-    H5LTset_attribute_double(file_id, "/", "sec1970", &sec1970, 1);
-    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
-    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
-    H5LTset_attribute_double(file_id, "/", "freqstep", &config.freqstep, 1);
+    attr_id = H5Acreate2(file_id, "sec1970", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &sec1970);
+    attr_id = H5Acreate2(file_id, "nfreq", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfreq);
+    attr_id = H5Acreate2(file_id, "freqstart", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstart);
+    attr_id = H5Acreate2(file_id, "freqstep", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstep);
 
     // vis
     // Create the compound datatype for memory.
@@ -658,6 +681,8 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value.");
 
     // Close and release resources.
+    status = H5Pclose (attr_space);
+    status = H5Dclose (attr_id);
     status = H5Pclose (dcpl);
     status = H5Dclose (dset);
     status = H5Sclose (space);
@@ -705,6 +730,7 @@ void writeData(const char *data_path)
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
+                status = H5Dclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
@@ -755,6 +781,7 @@ void writeData(const char *data_path)
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
+                status = H5Dclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
@@ -787,6 +814,7 @@ void writeData(const char *data_path)
             // Close and release resources.
             status = H5Dclose (dataset_id);
             status = H5Dclose (weather_dset);
+            status = H5Dclose (sub_dataspace_id);
             status = H5Sclose (dataspace_id);
             status = H5Tclose (memtype);
             status = H5Tclose (filetype);
