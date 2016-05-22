@@ -39,6 +39,8 @@
 #define FREQ_OFFSET 257
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
+#define bufethlen 8 * MAX_RAWPACKET_SIZE // Bytes
+#define bufethsize 100 * N_FREQUENCY
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 
@@ -73,31 +75,31 @@ typedef struct
     char* nsstart;
     char* nsstop;
     char* nscycle;
-    double inttime;
-    double weatherperiod;
+    float inttime;
+    float weatherperiod;
     const char* keywordver;
     const char* recvver;
     const char* corrver;
     const char* telescope;
     const char* history;
     const char* sitename;
-    double sitelat;
-    double sitelon;
-    double siteelev;
+    float sitelat;
+    float sitelon;
+    float siteelev;
     const char* timezone;
     const char* epoch;
-    double dishdiam;
+    float dishdiam;
     int nants;
     int nfeeds;
     int npols;
-    double cylen;
-    double cywid;
-    double lofreq;
+    float cylen;
+    float cywid;
+    float lofreq;
     int samplingbits;
     int corrmode;
     int nfreq;
-    double freqstart;
-    double freqstep;
+    float freqstart;
+    float freqstep;
 } configuration;
 
 
@@ -122,6 +124,7 @@ int weather_exist = 0;
 char weather_file[1024];
 struct itimerval new_value, old_value; // for timer use
 int timer_cnt = 0;
+double accurate_inttime; // integration time, Unit: second
 int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
 float *feedpos, *antpointing, *pointingtime, *polerr, *nspos, *noisesource, *weather;
@@ -131,6 +134,10 @@ unsigned char * buf01;
 unsigned char * buf02;
 int buf01_state = 0 ;
 int buf02_state = 0 ;
+
+// the bufeth is used for catching the online data from ethernet.
+unsigned char ** bufeth;
+int *bufeth_state;
 
 PyObject *pMain = NULL;
 PyObject *pMainDict = NULL;
@@ -185,11 +192,13 @@ void timer_handler(int sig_no)
 
     if (sig_no == SIGALRM && timer_cnt < nweather)
     {
+        timer_cnt++;
+
         fp = fopen(weather_file, "r");
         if (fp == NULL)
         {
-            printf("Error: Fail to open file %s\n", weather_file);
-            exit (-1);
+            printf("Error: Fail to open file %s, no weather data will get for this time\n", weather_file);
+            return;
         }
 
         while (fscanf(fp, "%s %s %s %s %s %s %s %s %s %s %s %s %s", str[0], str[1], str[2], str[3], str[4], str[5], str[6], str[7], str[8], str[9], str[10], str[11], str[12]) == 13)
@@ -209,8 +218,6 @@ void timer_handler(int sig_no)
 
         fclose(fp);
     }
-
-    timer_cnt++;
 }
 
 
@@ -219,7 +226,7 @@ void create_data_path(const char *data_path)
     if( access(data_path, F_OK) == -1 )
     {
         if (agmts.verbose)
-            printf("Data path %s does not exists, create it...", data_path);
+            printf("Data path %s does not exists, create it...\n", data_path);
         if( mkdir(data_path, 0755) == -1 )
         {
             printf("Error: Failed to create the data path %s!!!\n", data_path);
@@ -236,7 +243,7 @@ void create_data_path(const char *data_path)
 
 void init_buf()
 {
-    int i;
+    int i, j;
     char data_dir[1024], feedpos_dir[1024], blorder_dir[1024], nspos_dir[1024];
     FILE *data_file;
 
@@ -249,11 +256,24 @@ void init_buf()
         buf02[i] = 0xFF;
     }
 
+    bufeth    = (unsigned char **)malloc( sizeof(unsigned char *) * bufethsize );
+    bufeth_state = (int *)malloc( sizeof(int) * bufethsize);
+    for (i=0; i<bufethsize; i++)
+    {
+        bufeth[i] = (unsigned char  *)malloc( sizeof(unsigned char) * bufethlen );
+        bufeth_state[i] = 0;
+        for(j=0; j<bufethlen; j++)
+        {
+            bufeth[i][j] = 0xFF;
+        }
+    }
+
+
     nfeeds = config.nfeeds;
     nchans = 2 * nfeeds;
     nbls = nchans * (nchans + 1) / 2;
     nns = config.nns;
-    double accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
+    accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     nweather = (int) (accurate_inttime * N_TIME_PER_FILE / config.weatherperiod);
     if (nbls != N_BASELINE)
     {
@@ -389,6 +409,8 @@ void free_buf()
 {
     free(buf01);
     free(buf02);
+    free(bufeth);
+    free(bufeth_state);
     free(feedno);
     free(channo);
     free(blorder);
@@ -404,23 +426,24 @@ void free_buf()
 
 void gen_obs_log()
 {
-    printf("%s", "Generate observation log function not implemented yet!!!");
+    printf("%s", "Generate observation log function not implemented yet!!!\n");
 }
 
 void gen_datafile(const char *data_path)
 {
-    double accurate_inttime, span, start_offset, end_offset;
+    double span, start_offset, end_offset;
     char *obs_time;
     double sec1970;
     char *stime, *etime;
     char tmp_str[150];
     char file_name[35];
     char file_path[150];
-    PyObject *pObj = NULL;
+    // PyObject *pObj = NULL;
+    hsize_t attr_dims[] = {};
+    hid_t attr_space, attr_id;
     hid_t space, dset, dcpl; /* Handles */
     herr_t status;
 
-    accurate_inttime = (long)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
@@ -430,10 +453,6 @@ void gen_datafile(const char *data_path)
     // wait until start_time has been set, that is we have began to receive data
     while (pkt_id == -1)
         ;
-    while (pObj == NULL)
-    {
-        pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
-    }
 
     // start and end time for this hdf5 file
     if (file_count == 0)
@@ -466,6 +485,9 @@ void gen_datafile(const char *data_path)
     // Create a new hdf5 file using the default properties.
     file_id = H5Fcreate (file_path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
+    // Create a 0 dimension space for scalar attributes
+    attr_space = H5Screate_simple (0, attr_dims, NULL);
+
     // Create attributes
     // Type A: Common
     H5LTset_attribute_string(file_id, "/", "nickname", config.nickname);
@@ -475,32 +497,49 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "/", "keywordver", config.keywordver);
     // Type B: Site
     H5LTset_attribute_string(file_id, "/", "sitename", config.sitename);
-    H5LTset_attribute_double(file_id, "/", "sitelat", &config.sitelat, 1);
-    H5LTset_attribute_double(file_id, "/", "sitelon", &config.sitelon, 1);
-    H5LTset_attribute_double(file_id, "/", "siteelev", &config.siteelev, 1);
+    attr_id = H5Acreate2(file_id, "sitelat", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelat);
+    attr_id = H5Acreate2(file_id, "sitelon", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelon);
+    attr_id = H5Acreate2(file_id, "siteelev", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.siteelev);
     H5LTset_attribute_string(file_id, "/", "timezone", config.timezone);
     H5LTset_attribute_string(file_id, "/", "epoch", config.epoch);
     // Type C: Antenna
     H5LTset_attribute_string(file_id, "/", "telescope", config.telescope);
-    H5LTset_attribute_double(file_id, "/", "dishdiam", &config.dishdiam, 1);
-    H5LTset_attribute_int(file_id, "/", "nants", &config.nants, 1);
-    H5LTset_attribute_int(file_id, "/", "npols", &config.npols, 1);
-    H5LTset_attribute_int(file_id, "/", "nfeeds", &config.nfeeds, 1);
-    H5LTset_attribute_double(file_id, "/", "cylen", &config.cylen, 1);
-    H5LTset_attribute_double(file_id, "/", "cywid", &config.cywid, 1);
+    attr_id = H5Acreate2(file_id, "dishdiam", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.dishdiam);
+    attr_id = H5Acreate2(file_id, "nants", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nants);
+    attr_id = H5Acreate2(file_id, "npols", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.npols);
+    attr_id = H5Acreate2(file_id, "nfeeds", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfeeds);
+    attr_id = H5Acreate2(file_id, "cylen", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cylen);
+    attr_id = H5Acreate2(file_id, "cywid", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cywid);
     // Type D: Receiver
     H5LTset_attribute_string(file_id, "/", "recvver", config.recvver);
-    H5LTset_attribute_double(file_id, "/", "lofreq", &config.lofreq, 1);
+    attr_id = H5Acreate2(file_id, "lofreq", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.lofreq);
     // Type E: Correlator
     H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
-    H5LTset_attribute_int(file_id, "/", "samplingbits", &config.samplingbits, 1);
-    H5LTset_attribute_int(file_id, "/", "corrmode", &config.corrmode, 1);
-    H5LTset_attribute_double(file_id, "/", "inttime", &accurate_inttime, 1);
+    attr_id = H5Acreate2(file_id, "samplingbits", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.samplingbits);
+    attr_id = H5Acreate2(file_id, "corrmode", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.corrmode);
+    attr_id = H5Acreate2(file_id, "inttime", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &accurate_inttime);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
-    H5LTset_attribute_double(file_id, "/", "sec1970", &sec1970, 1);
-    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
-    H5LTset_attribute_int(file_id, "/", "nfreq", &config.nfreq, 1);
-    H5LTset_attribute_double(file_id, "/", "freqstep", &config.freqstep, 1);
+    attr_id = H5Acreate2(file_id, "sec1970", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &sec1970);
+    attr_id = H5Acreate2(file_id, "nfreq", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfreq);
+    attr_id = H5Acreate2(file_id, "freqstart", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstart);
+    attr_id = H5Acreate2(file_id, "freqstep", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstep);
 
     // vis
     // Create the compound datatype for memory.
@@ -519,10 +558,8 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "vis", "dimname", "Time, Frequency, Baseline");
 
     // for other datasets
-    // Create the dataset creation property list, set the layout to compact.
+    // Create the dataset creation property list, set the layout to contiguous.
     dcpl = H5Pcreate (H5P_DATASET_CREATE);
-    // debug ycli
-    //status = H5Pset_layout (dcpl, H5D_COMPACT);
     status = H5Pset_layout (dcpl, H5D_CONTIGUOUS);
 
     // feedno
@@ -658,6 +695,8 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value.");
 
     // Close and release resources.
+    status = H5Pclose (attr_space);
+    status = H5Dclose (attr_id);
     status = H5Pclose (dcpl);
     status = H5Dclose (dset);
     status = H5Sclose (space);
@@ -689,33 +728,40 @@ void writeData(const char *data_path)
             // Write a subset of data to the dataset.
             cbuf = (complex_t *)buf01;
             status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
+
+            // re-initialize the buffer
+            for (i=0; i<buflen; i++)
+                buf01[i] = 0xFF;
+            buf01_state = 0;
+
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 buf_cnt = 0;
 
                 if (weather_exist == 0) // while weather data file exists
                 {
+                    // Write weather data to the dataset before file close
+                    status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+
                     // alarm(0); // kill the timer
                     timer_cnt = 0; // not kill timer, but reset timer counter
-                }
 
-                // Write weather data to the dataset before file close
-                status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+                    // re-initialize weather buffer to nan
+                    u_char *uc = (u_char *)weather;
+                    for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
+                    {
+                        uc[i] = 0xFF;
+                    }
+                }
 
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
+                status = H5Dclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
-
-                // re-initialize weather buffer to nan
-                u_char *uc = (u_char *)weather;
-                for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
-                {
-                    uc[i] = 0xFF;
-                }
 
                 gen_datafile(data_path);
             }
@@ -724,10 +770,6 @@ void writeData(const char *data_path)
                 buf_cnt++;
             }
 
-            // re-initialize the buffer
-            for (i=0; i<buflen; i++)
-                buf01[i] = 0xFF;
-            buf01_state = 0;
         }
         else if( buf02_state == 1 )
         {
@@ -739,33 +781,40 @@ void writeData(const char *data_path)
             // Write a subset of data to the dataset.
             cbuf = (complex_t *)buf02;
             status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
+
+            // re-initialize the buffer
+            for (i=0; i<buflen; i++)
+                buf02[i] = 0xFF;
+            buf02_state = 0;
+
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 buf_cnt = 0;
 
                 if (weather_exist == 0) // while weather data file exists
                 {
+                    // Write weather data to the dataset before file close
+                    status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+
                     // alarm(0); // kill the timer
                     timer_cnt = 0; // not kill timer, but reset timer counter
-                }
 
-                // Write weather data to the dataset before file close
-                status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+                    // re-initialize weather buffer to nan
+                    u_char *uc = (u_char *)weather;
+                    for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
+                    {
+                        uc[i] = 0xFF;
+                    }
+                }
 
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
+                status = H5Dclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
-
-                // re-initialize weather buffer to nan
-                u_char *uc = (u_char *)weather;
-                for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
-                {
-                    uc[i] = 0xFF;
-                }
 
                 gen_datafile(data_path);
             }
@@ -774,10 +823,6 @@ void writeData(const char *data_path)
                 buf_cnt++;
             }
 
-            // re-initialize the buffer
-            for (i=0; i<buflen; i++)
-                buf02[i] = 0xFF;
-            buf02_state = 0;
         }
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
         {
@@ -787,6 +832,7 @@ void writeData(const char *data_path)
             // Close and release resources.
             status = H5Dclose (dataset_id);
             status = H5Dclose (weather_dset);
+            status = H5Dclose (sub_dataspace_id);
             status = H5Sclose (dataspace_id);
             status = H5Tclose (memtype);
             status = H5Tclose (filetype);
@@ -797,14 +843,274 @@ void writeData(const char *data_path)
     }
 }
 
+void recvData()
+{
+    //char log_path[150];
+    register int packet_len ;
+    //register int row = 0;
+    register int init_cnt, bufeth_index=0;
+    //register int pkt_id_old=-1, current_cnt, freq_ind;
+    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
+    //register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    //register long row_size = 8 * N_BASELINE;
+    u_char frame_buff[BUFSIZE];
+    u_char * frame_buff_p = frame_buff;
+    //u_char * start_buf_p;
+    //u_char * start_frame_p;
+    //int copy_len;
+    int recv_fd;
+    int old_cnt, i = 0;
+    struct sockaddr_ll sll;
+    struct ifreq ifr;
+    //FILE *fp;
 
-void recvData(const char *data_path)
+    // open log file
+    //strcpy(log_path, data_path);
+    //strcat(log_path, "/recv_data.log");
+    //fp = fopen(log_path, "wb");
+
+    // check if weather data file exits
+    getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, "/");
+    strcat(weather_file, WEATHER_PATH);
+    if( access(weather_file, F_OK) == -1 )
+    {
+        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+    }
+    else
+    {
+        weather_exist = 1;
+
+        // set timer period
+        new_value.it_value.tv_sec = 0;
+        new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
+        new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
+        new_value.it_interval.tv_usec = 0;
+    }
+
+    // initialize network related things
+    recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    bzero(&sll, sizeof(sll));
+    bzero(&ifr, sizeof(ifr));
+    strncpy((char *)ifr.ifr_name, DEVICE_NAME, IFNAMSIZ);
+    ioctl(recv_fd, SIOCGIFINDEX, &ifr);
+    sll.sll_family   = AF_PACKET;
+    sll.sll_protocol = htons(ETH_P_ALL);
+    sll.sll_ifindex  = ifr.ifr_ifindex;
+    bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
+
+    printf("Begin to receive data ... \n");
+    fflush(stdout);
+
+    while (Running) // Find packet zero.
+    {
+        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+        if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
+        {
+            if (i == 0)
+            {
+                old_cnt = *(int *)(frame_buff_p + 22);
+                i=1;
+            }
+            else
+            {
+                init_cnt = *(int *)(frame_buff_p + 22);
+                // find where time count changes as the starting point 
+                // to receive data to buffer
+                if (init_cnt != old_cnt)
+                {
+                    // use this time as the data receiving start time 
+                    // (may need more accurate start time, but how to get?)
+                    PyRun_SimpleString("start_timestamp = time.time()"); 
+                    // Seconds since epoch 1970 Jan. 1st
+                    pkt_id = 0;
+                    // now setup the timer and begin to get weather data
+                    if (weather_exist) // while weather data file exists
+                    {
+                        setitimer(ITIMER_REAL, &new_value, &old_value);
+                        // initialize timer count to 0
+                        timer_cnt = 0;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    while(Running)
+    {
+        while(bufeth_index<bufethsize)
+        {
+            while(bufeth_state[bufeth_index]!=0)
+            {}
+            memcpy(bufeth + bufeth_index, frame_buff_p, packet_len);
+            packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+            bufeth_state[bufeth_index]=packet_len;
+            bufeth_index++;
+        }
+        bufeth_index = 0;
+
+    }
+    bufeth_state[0] = -1; // set the 1st eth buff flag to -1, the check thread break
+    //fclose(fp);
+}
+
+void checkData(const char *data_path)
 {
     char log_path[150];
-    register int packet_len ;
+    register int packet_len, row ;
+    register int init_cnt = -1, bufeth_index=0, pkt_id_old=-1;
+    register int current_cnt, freq_ind;
+    register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    register long row_size = 8 * N_BASELINE;
+    u_char * frame_buff_p;
+    u_char * start_buf_p;
+    u_char * start_frame_p;
+    int copy_len;
+    FILE *fp;
+
+    // open log file
+    strcpy(log_path, data_path);
+    strcat(log_path, "/recv_data.log");
+    fp = fopen(log_path, "wb");
+
+
+    while(Running)
+    {
+        while(bufeth_index<bufethsize)
+        {
+            while(bufeth_state[bufeth_index]==0)
+            {}
+            if(bufeth_state[bufeth_index]==-1)
+                // the recv thread already break, break here.
+                break;
+
+            frame_buff_p = *(u_char **) (bufeth + bufeth_index);
+
+            pkt_id = *(int *)(frame_buff_p  + 18);
+            packet_len = bufeth_state[bufeth_index];
+            if (init_cnt == -1)
+                init_cnt = *(int *)(frame_buff_p + 22);
+            //row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+            if (buf01_state == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    // printf("%d ", row);
+                }
+                else if (pkt_id < pkt_id_old) // have packet lost
+                {
+                    // drop packets until find packet 0
+                    pkt_id_old = 100;
+                    continue;
+                }
+
+                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+                pkt_id_old = pkt_id;
+
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf01 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+                if (row >= row_in_buf)
+                    buf01_state = 1;
+                    init_cnt = current_cnt;
+            }
+            else if (buf02_state == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    // printf("%d ", row);
+                }
+                else if (pkt_id < pkt_id_old) // have packet lost
+                {
+                    // drop packets until find packet 0
+                    pkt_id_old = 100;
+                    continue;
+                }
+
+                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+                pkt_id_old = pkt_id;
+
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf02 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+                if (row >= row_in_buf)
+                    buf02_state = 1;
+                    init_cnt = current_cnt;
+            }
+            else
+            {
+                printf("Buf01 and Buf02 are both full.\n");
+                fflush(stdout);
+                Running = 0;
+            }
+
+            bufeth_state[bufeth_index] = 0;
+            bufeth_index++;
+        }
+        bufeth_index = 0;
+    }
+    sleep(0.2);
+    DataExist = 0;
+
+    fclose(fp);
+}
+
+
+void recv_checkData(const char *data_path)
+{
+    char log_path[150];
+    register int packet_len;
     register int row = 0;
     register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
-    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
     register long row_size = 8 * N_BASELINE;
     u_char frame_buff[BUFSIZE];
@@ -829,7 +1135,7 @@ void recvData(const char *data_path)
     strcat(weather_file, WEATHER_PATH);
     if( access(weather_file, F_OK) == -1 )
     {
-        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+        printf("Error: Weather data file %s does not exist, so weather data will not get\n", weather_file);
     }
     else
     {
@@ -1237,7 +1543,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     if (agmts.verbose) {
-        printf("Configure parameters loaded from '%s'", config_file);
+        printf("Configure parameters loaded from '%s'\n", config_file);
     }
 
     /* create data path if it does not exist */
@@ -1247,12 +1553,15 @@ int main(int argc, char* argv[])
     /* allocate and initialize buffer */
     init_buf();
 
-    #pragma omp parallel num_threads(2) private(thread_id)
+    #pragma omp parallel num_threads(3) private(thread_id)
     {
         thread_id = omp_get_thread_num();
         if(thread_id == 0)
-            recvData(data_path);
+            //recvData(data_path);
+            recvData();
         else if(thread_id == 1)
+            checkData(data_path);
+        else if(thread_id == 2)
             writeData(data_path);
     }
 
