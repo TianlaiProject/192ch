@@ -39,6 +39,8 @@
 #define FREQ_OFFSET 257
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
+#define bufethlen 8 * MAX_RAWPACKET_SIZE // Bytes
+#define bufethsize 100 * N_FREQUENCY
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 
@@ -132,6 +134,10 @@ unsigned char * buf01;
 unsigned char * buf02;
 int buf01_state = 0 ;
 int buf02_state = 0 ;
+
+// the bufeth is used for catching the online data from ethernet.
+unsigned char ** bufeth;
+int *bufeth_state;
 
 PyObject *pMain = NULL;
 PyObject *pMainDict = NULL;
@@ -237,7 +243,7 @@ void create_data_path(const char *data_path)
 
 void init_buf()
 {
-    int i;
+    int i, j;
     char data_dir[1024], feedpos_dir[1024], blorder_dir[1024], nspos_dir[1024];
     FILE *data_file;
 
@@ -249,6 +255,19 @@ void init_buf()
         buf01[i] = 0xFF;
         buf02[i] = 0xFF;
     }
+
+    bufeth    = (unsigned char **)malloc( sizeof(unsigned char *) * bufethsize );
+    bufeth_state = (int *)malloc( sizeof(int) * bufethsize);
+    for (i=0; i<bufethsize; i++)
+    {
+        bufeth[i] = (unsigned char  *)malloc( sizeof(unsigned char) * bufethlen );
+        bufeth_state[i] = 0;
+        for(j=0; j<bufethlen; j++)
+        {
+            bufeth[i][j] = 0xFF;
+        }
+    }
+
 
     nfeeds = config.nfeeds;
     nchans = 2 * nfeeds;
@@ -390,6 +409,8 @@ void free_buf()
 {
     free(buf01);
     free(buf02);
+    free(bufeth);
+    free(bufeth_state);
     free(feedno);
     free(channo);
     free(blorder);
@@ -825,11 +846,272 @@ void writeData(const char *data_path)
     }
 }
 
+void recvData()
+{
+    //char log_path[150];
+    register int packet_len ;
+    //register int row = 0;
+    register int init_cnt, bufeth_index=0;
+    //register int pkt_id_old=-1, current_cnt, freq_ind;
+    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
+    //register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    //register long row_size = 8 * N_BASELINE;
+    u_char frame_buff[BUFSIZE];
+    u_char * frame_buff_p = frame_buff;
+    //u_char * start_buf_p;
+    //u_char * start_frame_p;
+    //int copy_len;
+    int recv_fd;
+    int old_cnt, i = 0;
+    struct sockaddr_ll sll;
+    struct ifreq ifr;
+    //FILE *fp;
 
-void recvData(const char *data_path)
+    // open log file
+    //strcpy(log_path, data_path);
+    //strcat(log_path, "/recv_data.log");
+    //fp = fopen(log_path, "wb");
+
+    // check if weather data file exits
+    getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, "/");
+    strcat(weather_file, WEATHER_PATH);
+    if( access(weather_file, F_OK) == -1 )
+    {
+        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+    }
+    else
+    {
+        weather_exist = 1;
+
+        // set timer period
+        new_value.it_value.tv_sec = 0;
+        new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
+        new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
+        new_value.it_interval.tv_usec = 0;
+    }
+
+    // initialize network related things
+    recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    bzero(&sll, sizeof(sll));
+    bzero(&ifr, sizeof(ifr));
+    strncpy((char *)ifr.ifr_name, DEVICE_NAME, IFNAMSIZ);
+    ioctl(recv_fd, SIOCGIFINDEX, &ifr);
+    sll.sll_family   = AF_PACKET;
+    sll.sll_protocol = htons(ETH_P_ALL);
+    sll.sll_ifindex  = ifr.ifr_ifindex;
+    bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
+
+    printf("Begin to receive data ... \n");
+    fflush(stdout);
+
+    while (Running) // Find packet zero.
+    {
+        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+        if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
+        {
+            if (i == 0)
+            {
+                old_cnt = *(int *)(frame_buff_p + 22);
+                i=1;
+            }
+            else
+            {
+                init_cnt = *(int *)(frame_buff_p + 22);
+                // find where time count changes as the starting point 
+                // to receive data to buffer
+                if (init_cnt != old_cnt)
+                {
+                    // use this time as the data receiving start time 
+                    // (may need more accurate start time, but how to get?)
+                    PyRun_SimpleString("start_timestamp = time.time()"); 
+                    // Seconds since epoch 1970 Jan. 1st
+                    pkt_id = 0;
+                    // now setup the timer and begin to get weather data
+                    if (weather_exist) // while weather data file exists
+                    {
+                        setitimer(ITIMER_REAL, &new_value, &old_value);
+                        // initialize timer count to 0
+                        timer_cnt = 0;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    while(Running)
+    {
+        while(bufeth_index<bufethsize)
+        {
+            while(bufeth_state[bufeth_index]!=0)
+            {}
+            memcpy(bufeth + bufeth_index, frame_buff_p, packet_len);
+            packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+            bufeth_state[bufeth_index]=packet_len;
+            bufeth_index++;
+        }
+        bufeth_index = 0;
+
+    }
+    bufeth_state[0] = -1; // set the 1st eth buff flag to -1, the check thread break
+    //fclose(fp);
+}
+
+void checkData(const char *data_path)
 {
     char log_path[150];
-    register int packet_len ;
+    register int packet_len, row ;
+    register int init_cnt = -1, bufeth_index=0, pkt_id_old=-1;
+    register int current_cnt, freq_ind;
+    register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    register long row_size = 8 * N_BASELINE;
+    u_char * frame_buff_p;
+    u_char * start_buf_p;
+    u_char * start_frame_p;
+    int copy_len;
+    FILE *fp;
+
+    // open log file
+    strcpy(log_path, data_path);
+    strcat(log_path, "/recv_data.log");
+    fp = fopen(log_path, "wb");
+
+
+    while(Running)
+    {
+        while(bufeth_index<bufethsize)
+        {
+            while(bufeth_state[bufeth_index]==0)
+            {}
+            if(bufeth_state[bufeth_index]==-1)
+                // the recv thread already break, break here.
+                break;
+
+            frame_buff_p = *(u_char **) (bufeth + bufeth_index);
+
+            pkt_id = *(int *)(frame_buff_p  + 18);
+            packet_len = bufeth_state[bufeth_index];
+            if (init_cnt == -1)
+                init_cnt = *(int *)(frame_buff_p + 22);
+            //row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+            if (buf01_state == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    // printf("%d ", row);
+                }
+                else if (pkt_id < pkt_id_old) // have packet lost
+                {
+                    // drop packets until find packet 0
+                    pkt_id_old = 100;
+                    continue;
+                }
+
+                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+                pkt_id_old = pkt_id;
+
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf01 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+                if (row >= row_in_buf)
+                    buf01_state = 1;
+                    init_cnt = current_cnt;
+            }
+            else if (buf02_state == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    current_cnt = *(int *)(frame_buff_p + 22);
+                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                    // printf("%d ", row);
+                }
+                else if (pkt_id < pkt_id_old) // have packet lost
+                {
+                    // drop packets until find packet 0
+                    pkt_id_old = 100;
+                    continue;
+                }
+
+                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+                pkt_id_old = pkt_id;
+
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf02 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+                if (row >= row_in_buf)
+                    buf02_state = 1;
+                    init_cnt = current_cnt;
+            }
+            else
+            {
+                printf("Buf01 and Buf02 are both full.\n");
+                fflush(stdout);
+                Running = 0;
+            }
+
+            bufeth_state[bufeth_index] = 0;
+            bufeth_index++;
+        }
+        bufeth_index = 0;
+    }
+    sleep(0.2);
+    DataExist = 0;
+
+    fclose(fp);
+}
+
+
+void recv_checkData(const char *data_path)
+{
+    char log_path[150];
+    register int packet_len;
     register int row = 0;
     register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
     //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
@@ -1275,12 +1557,15 @@ int main(int argc, char* argv[])
     /* allocate and initialize buffer */
     init_buf();
 
-    #pragma omp parallel num_threads(2) private(thread_id)
+    #pragma omp parallel num_threads(3) private(thread_id)
     {
         thread_id = omp_get_thread_num();
         if(thread_id == 0)
-            recvData(data_path);
+            //recvData(data_path);
+            recvData();
         else if(thread_id == 1)
+            checkData(data_path);
+        else if(thread_id == 2)
             writeData(data_path);
     }
 
