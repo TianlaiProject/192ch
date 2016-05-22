@@ -186,11 +186,13 @@ void timer_handler(int sig_no)
 
     if (sig_no == SIGALRM && timer_cnt < nweather)
     {
+        timer_cnt++;
+
         fp = fopen(weather_file, "r");
         if (fp == NULL)
         {
-            printf("Error: Fail to open file %s\n", weather_file);
-            exit (-1);
+            printf("Error: Fail to open file %s, no weather data will get for this time\n", weather_file);
+            return;
         }
 
         while (fscanf(fp, "%s %s %s %s %s %s %s %s %s %s %s %s %s", str[0], str[1], str[2], str[3], str[4], str[5], str[6], str[7], str[8], str[9], str[10], str[11], str[12]) == 13)
@@ -210,8 +212,6 @@ void timer_handler(int sig_no)
 
         fclose(fp);
     }
-
-    timer_cnt++;
 }
 
 
@@ -220,7 +220,7 @@ void create_data_path(const char *data_path)
     if( access(data_path, F_OK) == -1 )
     {
         if (agmts.verbose)
-            printf("Data path %s does not exists, create it...", data_path);
+            printf("Data path %s does not exists, create it...\n", data_path);
         if( mkdir(data_path, 0755) == -1 )
         {
             printf("Error: Failed to create the data path %s!!!\n", data_path);
@@ -405,7 +405,7 @@ void free_buf()
 
 void gen_obs_log()
 {
-    printf("%s", "Generate observation log function not implemented yet!!!");
+    printf("%s", "Generate observation log function not implemented yet!!!\n");
 }
 
 void gen_datafile(const char *data_path)
@@ -542,7 +542,7 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "vis", "dimname", "Time, Frequency, Baseline");
 
     // for other datasets
-    // Create the dataset creation property list, set the layout to compact.
+    // Create the dataset creation property list, set the layout to contiguous.
     dcpl = H5Pcreate (H5P_DATASET_CREATE);
     // debug ycli
     //status = H5Pset_layout (dcpl, H5D_COMPACT);
@@ -714,18 +714,31 @@ void writeData(const char *data_path)
             // Write a subset of data to the dataset.
             cbuf = (complex_t *)buf01;
             status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
+
+            // re-initialize the buffer
+            for (i=0; i<buflen; i++)
+                buf01[i] = 0xFF;
+            buf01_state = 0;
+
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 buf_cnt = 0;
 
                 if (weather_exist == 0) // while weather data file exists
                 {
+                    // Write weather data to the dataset before file close
+                    status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+
                     // alarm(0); // kill the timer
                     timer_cnt = 0; // not kill timer, but reset timer counter
-                }
 
-                // Write weather data to the dataset before file close
-                status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+                    // re-initialize weather buffer to nan
+                    u_char *uc = (u_char *)weather;
+                    for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
+                    {
+                        uc[i] = 0xFF;
+                    }
+                }
 
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
@@ -736,13 +749,6 @@ void writeData(const char *data_path)
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
 
-                // re-initialize weather buffer to nan
-                u_char *uc = (u_char *)weather;
-                for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
-                {
-                    uc[i] = 0xFF;
-                }
-
                 gen_datafile(data_path);
             }
             else
@@ -750,10 +756,6 @@ void writeData(const char *data_path)
                 buf_cnt++;
             }
 
-            // re-initialize the buffer
-            for (i=0; i<buflen; i++)
-                buf01[i] = 0xFF;
-            buf01_state = 0;
         }
         else if( buf02_state == 1 )
         {
@@ -765,18 +767,31 @@ void writeData(const char *data_path)
             // Write a subset of data to the dataset.
             cbuf = (complex_t *)buf02;
             status = H5Dwrite (dataset_id, memtype, sub_dataspace_id, dataspace_id, H5P_DEFAULT, cbuf);
+
+            // re-initialize the buffer
+            for (i=0; i<buflen; i++)
+                buf02[i] = 0xFF;
+            buf02_state = 0;
+
             if (buf_cnt == N_BUFFER_PER_FILE - 1)
             {
                 buf_cnt = 0;
 
                 if (weather_exist == 0) // while weather data file exists
                 {
+                    // Write weather data to the dataset before file close
+                    status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+
                     // alarm(0); // kill the timer
                     timer_cnt = 0; // not kill timer, but reset timer counter
-                }
 
-                // Write weather data to the dataset before file close
-                status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
+                    // re-initialize weather buffer to nan
+                    u_char *uc = (u_char *)weather;
+                    for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
+                    {
+                        uc[i] = 0xFF;
+                    }
+                }
 
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
@@ -787,13 +802,6 @@ void writeData(const char *data_path)
                 status = H5Tclose (filetype);
                 status = H5Fclose (file_id);
 
-                // re-initialize weather buffer to nan
-                u_char *uc = (u_char *)weather;
-                for (i=0; i<9*nweather*sizeof(float)/sizeof(u_char); i++)
-                {
-                    uc[i] = 0xFF;
-                }
-
                 gen_datafile(data_path);
             }
             else
@@ -801,10 +809,6 @@ void writeData(const char *data_path)
                 buf_cnt++;
             }
 
-            // re-initialize the buffer
-            for (i=0; i<buflen; i++)
-                buf02[i] = 0xFF;
-            buf02_state = 0;
         }
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
         {
@@ -857,7 +861,7 @@ void recvData(const char *data_path)
     strcat(weather_file, WEATHER_PATH);
     if( access(weather_file, F_OK) == -1 )
     {
-        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+        printf("Error: Weather data file %s does not exist, so weather data will not get\n", weather_file);
     }
     else
     {
@@ -1265,7 +1269,7 @@ int main(int argc, char* argv[])
         return 1;
     }
     if (agmts.verbose) {
-        printf("Configure parameters loaded from '%s'", config_file);
+        printf("Configure parameters loaded from '%s'\n", config_file);
     }
 
     /* create data path if it does not exist */
