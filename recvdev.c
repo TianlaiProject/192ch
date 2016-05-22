@@ -423,7 +423,6 @@ void gen_datafile(const char *data_path)
     hid_t space, dset, dcpl; /* Handles */
     herr_t status;
 
-    // accurate_inttime = (int)(1.0e9*config.inttime) / (2048*4) / (8*16*2*3) * (8*16*2*3) * (2048*4) * 1.0e-9; // integration time, Unit: second
     span = accurate_inttime * N_TIME_PER_FILE; // time span in one file, Unit: second
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
@@ -433,10 +432,6 @@ void gen_datafile(const char *data_path)
     // wait until start_time has been set, that is we have began to receive data
     while (pkt_id == -1)
         ;
-    /* while (pObj == NULL) */
-    /* { */
-    /*     pObj = PyMapping_GetItemString(pMainDict, "start_timestamp"); */
-    /* } */
 
     // start and end time for this hdf5 file
     if (file_count == 0)
@@ -544,8 +539,6 @@ void gen_datafile(const char *data_path)
     // for other datasets
     // Create the dataset creation property list, set the layout to contiguous.
     dcpl = H5Pcreate (H5P_DATASET_CREATE);
-    // debug ycli
-    //status = H5Pset_layout (dcpl, H5D_COMPACT);
     status = H5Pset_layout (dcpl, H5D_CONTIGUOUS);
 
     // feedno
@@ -836,7 +829,6 @@ void recvData(const char *data_path)
     register int packet_len ;
     register int row = 0;
     register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
-    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
     register long row_size = 8 * N_BASELINE;
     u_char frame_buff[BUFSIZE];
