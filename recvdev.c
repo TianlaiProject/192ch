@@ -738,7 +738,7 @@ void writeData(const char *data_path)
             {
                 buf_cnt = 0;
 
-                if (weather_exist == 0) // while weather data file exists
+                if (weather_exist) // while weather data file exists
                 {
                     // Write weather data to the dataset before file close
                     status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
@@ -791,7 +791,7 @@ void writeData(const char *data_path)
             {
                 buf_cnt = 0;
 
-                if (weather_exist == 0) // while weather data file exists
+                if (weather_exist) // while weather data file exists
                 {
                     // Write weather data to the dataset before file close
                     status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
