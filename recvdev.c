@@ -39,7 +39,7 @@
 #define FREQ_OFFSET 257
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
-#define bufethlen 8 * MAX_RAWPACKET_SIZE // Bytes
+#define bufethlen MAX_RAWPACKET_SIZE // Bytes
 #define bufethsize 100 * N_FREQUENCY
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
@@ -937,15 +937,22 @@ void recvData()
         }
     }
 
+    printf("\n\nOK 1 \n\n");
+
     while(Running)
     {
         while(bufeth_index<bufethsize)
         {
             while(bufeth_state[bufeth_index]!=0)
             {}
-            memcpy(bufeth + bufeth_index, frame_buff_p, packet_len);
-            packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+            //printf("\nreading %d package", bufeth_index);
+            //printf("\npkt_id = %d ", *(int *) (frame_buff+18));
+            memcpy(*(bufeth + bufeth_index), frame_buff_p, packet_len);
+            //pkt_id = *(int *)(*(bufeth + bufeth_index) + 18);
+            //printf("\nreading pkt_id = \t%d\n", pkt_id);
+            //printf("\n\n OK \n\n");
             bufeth_state[bufeth_index]=packet_len;
+            packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
             bufeth_index++;
         }
         bufeth_index = 0;
@@ -957,6 +964,7 @@ void recvData()
 
 void checkData(const char *data_path)
 {
+    //sleep(40);
     char log_path[150];
     register int packet_len, row ;
     register int init_cnt = -1, bufeth_index=0, pkt_id_old=-1;
@@ -981,14 +989,18 @@ void checkData(const char *data_path)
         {
             while(bufeth_state[bufeth_index]==0)
             {}
+            //printf("\nchecking %d package", bufeth_index);
             if(bufeth_state[bufeth_index]==-1)
                 // the recv thread already break, break here.
                 break;
 
-            frame_buff_p = *(u_char **) (bufeth + bufeth_index);
+            //frame_buff_p = *(u_char **) (bufeth + bufeth_index);
+            //frame_buff_p = (u_char *) (bufeth + bufeth_index);
+            frame_buff_p = *(bufeth + bufeth_index);
 
             pkt_id = *(int *)(frame_buff_p  + 18);
             packet_len = bufeth_state[bufeth_index];
+            //printf("checking %d pkt_id\t%d\n", bufeth_index, pkt_id);
             if (init_cnt == -1)
                 init_cnt = *(int *)(frame_buff_p + 22);
             //row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
