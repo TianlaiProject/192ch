@@ -40,7 +40,7 @@
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
 #define bufethlen MAX_RAWPACKET_SIZE // Bytes
-#define bufethsize 100 * N_FREQUENCY
+#define bufethsize 100 * N_FREQUENCY * 2
 #define N_BUFFER_PER_FILE 45   // 30 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 
@@ -720,6 +720,7 @@ void writeData(const char *data_path)
     {
         if( buf01_state == 1 )
         {
+            //printf("writing Buff01\n");
             offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
@@ -773,6 +774,7 @@ void writeData(const char *data_path)
         }
         else if( buf02_state == 1 )
         {
+            //printf("writing Buff02\n");
             offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
@@ -937,14 +939,12 @@ void recvData()
         }
     }
 
-    printf("\n\nOK 1 \n\n");
-
     while(Running)
     {
         while(bufeth_index<bufethsize)
         {
             while(bufeth_state[bufeth_index]!=0)
-            {}
+            {printf("recv chackup checking!!!\n");}
             //printf("\nreading %d package", bufeth_index);
             //printf("\npkt_id = %d ", *(int *) (frame_buff+18));
             memcpy(*(bufeth + bufeth_index), frame_buff_p, packet_len);
@@ -974,6 +974,8 @@ void checkData(const char *data_path)
     u_char * frame_buff_p;
     u_char * start_buf_p;
     u_char * start_frame_p;
+    int buf01_state_local = 0 ;
+    int buf02_state_local = 0 ;
     int copy_len;
     FILE *fp;
 
@@ -1004,26 +1006,47 @@ void checkData(const char *data_path)
             if (init_cnt == -1)
                 init_cnt = *(int *)(frame_buff_p + 22);
             //row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-            if (buf01_state == 0)
+            if (pkt_id == 0)
             {
-                if (pkt_id == 0)
+                current_cnt = *(int *)(frame_buff_p + 22);
+                freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                //printf("%d %d %d %d\n", row, row_in_buf, buf01_state, buf02_state);
+
+                if (row >= row_in_buf)
                 {
-                    current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                    //printf("switch buf %d %d\n", buf01_state, buf02_state);
+                    //fflush(stdout);
+                    if (buf01_state_local == 0)
+                    {
+                        buf01_state_local = 1;
+                        buf01_state       = 1;
+                        buf02_state_local = buf02_state;
+                    }
+                    else if (buf02_state_local == 0)
+                    {
+                        buf02_state_local = 1;
+                        buf02_state       = 1;
+                        buf01_state_local = buf01_state;
+                    }
+                    init_cnt = current_cnt;
                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    // printf("%d ", row);
-                }
-                else if (pkt_id < pkt_id_old) // have packet lost
-                {
-                    // drop packets until find packet 0
-                    pkt_id_old = 100;
-                    continue;
                 }
 
-                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
-                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
-                pkt_id_old = pkt_id;
+            }
+            else if (pkt_id < pkt_id_old) // have packet lost
+            {
+                // drop packets until find packet 0
+                pkt_id_old = 100;
+                continue;
+            }
 
+            if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+                fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+            pkt_id_old = pkt_id;
+
+            if (buf01_state_local == 0)
+            {
                 if (pkt_id == 0)
                 {
                     start_buf_p = buf01 + row*row_size;
@@ -1047,30 +1070,9 @@ void checkData(const char *data_path)
 
                 memcpy(start_buf_p, start_frame_p, copy_len);
 
-                if (row >= row_in_buf)
-                    buf01_state = 1;
-                    init_cnt = current_cnt;
             }
-            else if (buf02_state == 0)
+            else if (buf02_state_local == 0)
             {
-                if (pkt_id == 0)
-                {
-                    current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    // printf("%d ", row);
-                }
-                else if (pkt_id < pkt_id_old) // have packet lost
-                {
-                    // drop packets until find packet 0
-                    pkt_id_old = 100;
-                    continue;
-                }
-
-                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
-                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
-                pkt_id_old = pkt_id;
-
                 if (pkt_id == 0)
                 {
                     start_buf_p = buf02 + row*row_size;
@@ -1094,13 +1096,10 @@ void checkData(const char *data_path)
 
                 memcpy(start_buf_p, start_frame_p, copy_len);
 
-                if (row >= row_in_buf)
-                    buf02_state = 1;
-                    init_cnt = current_cnt;
             }
             else
             {
-                printf("Buf01 and Buf02 are both full.\n");
+                //printf("Buf01 and Buf02 are both full.\n");
                 fflush(stdout);
                 Running = 0;
             }

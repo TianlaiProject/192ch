@@ -33,7 +33,7 @@ then
     echo "Run program with configure parameters in file $config_file..."
     #nohup ./recvPacket $data_path $config_file -v --gen_obslog >${output_path}recv_std.out 2>${output_path}recv_err.out &
     ./recvPacket $data_path $config_file -v --gen_obslog 
-    # ./recvPacket $data_path $config_file
+    #./recvPacket $data_path $config_file
 else
     echo "Error: configure parameters file $config_file does not exit!!!"
 fi
