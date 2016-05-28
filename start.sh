@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+source /home/observer/.bashrc
 
 create_time=`date "+%Y%m%d%H%M%S"`
 
