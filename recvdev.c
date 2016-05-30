@@ -122,7 +122,7 @@ int weather_exist = 0;
 char weather_file[1024];
 struct itimerval new_value, old_value; // for timer use
 int timer_cnt = 0;
-double accurate_inttime; // integration time, Unit: second
+float accurate_inttime; // integration time, Unit: second
 int nfeeds, nchans, nbls, nns, nweather;
 int *feedno, *channo, *blorder;
 float *feedpos, *antpointing, *pointingtime, *polerr, *nspos, *noisesource, *weather;
@@ -410,9 +410,9 @@ void gen_obs_log()
 
 void gen_datafile(const char *data_path)
 {
-    double span, start_offset, end_offset;
+    float span, start_offset, end_offset;
+    float sec1970;
     char *obs_time;
-    double sec1970;
     char *stime, *etime;
     char tmp_str[150];
     char file_name[35];
@@ -443,7 +443,7 @@ void gen_datafile(const char *data_path)
     PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
     // get value from python, better to have error checking
     obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
-    sec1970 = start_offset + PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
+    sec1970 = start_offset + (float) PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
     PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % (stime.year, stime.month, stime.day, stime.hour, stime.minute, stime.second)");
     stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
     PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % (etime.year, etime.month, etime.day, etime.hour, etime.minute, etime.second)");
