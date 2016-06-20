@@ -23,6 +23,7 @@
 #include "hdf5.h"
 #include "hdf5_hl.h"
 #include "ini.h"
+#include <time.h>
 
 #define DEVICE_NAME "enp131s0d1"  // the name of the network device
 
@@ -39,7 +40,11 @@
 #define FREQ_OFFSET 257
 #define N_INTEGRA_TIME 10       // N_INTEGRA_TIME integration times in one buf
 #define buflen 8 * N_BASELINE * N_FREQUENCY * N_INTEGRA_TIME // Bytes
-#define N_BUFFER_PER_FILE 45   // 30 min data per file
+//#define bufethlen MAX_RAWPACKET_SIZE // Bytes
+#define bufethlen BUFSIZE // Bytes
+#define bufethsize MAX_PACKET_ID * N_FREQUENCY * 2 //* N_INTEGRA_TIME 
+//#define N_BUFFER_PER_FILE 45   // 30 min data per file
+#define N_BUFFER_PER_FILE 15   // 3 min data per file
 #define N_TIME_PER_FILE N_INTEGRA_TIME * N_BUFFER_PER_FILE
 
 // weather related
@@ -132,6 +137,16 @@ unsigned char * buf01;
 unsigned char * buf02;
 int buf01_state = 0 ;
 int buf02_state = 0 ;
+
+// the bufeth is used for catching the online data from ethernet.
+//unsigned char bufeth[bufethsize][bufethlen] = {};
+//int bufeth_state[bufethsize] = {};
+unsigned char **bufeth;
+int *bufeth_state;
+//omp_lock_t w_lock[bufethsize];
+//omp_lock_t r_lock[bufethsize];
+omp_lock_t w_lock[2];
+omp_lock_t r_lock[2];
 
 PyObject *pMain = NULL;
 PyObject *pMainDict = NULL;
@@ -237,7 +252,7 @@ void create_data_path(const char *data_path)
 
 void init_buf()
 {
-    int i;
+    int i, j;
     char data_dir[1024], feedpos_dir[1024], blorder_dir[1024], nspos_dir[1024];
     FILE *data_file;
 
@@ -249,6 +264,29 @@ void init_buf()
         buf01[i] = 0xFF;
         buf02[i] = 0xFF;
     }
+
+    bufeth    = (unsigned char **)malloc( sizeof(unsigned char *) * bufethsize );
+    bufeth_state = (int *)malloc( sizeof(int) * bufethsize);
+    for (i=0; i<bufethsize; i++)
+    {
+        bufeth[i] = (unsigned char  *)malloc( sizeof(unsigned char) * bufethlen );
+        bufeth_state[i] = 0;
+        for(j=0; j<bufethlen; j++)
+        {
+            bufeth[i][j] = 0xFF;
+        }
+        //omp_init_lock(&(w_lock[i]));
+        //omp_init_lock(&(r_lock[i]));
+        //omp_set_lock(&(r_lock[i]));
+
+    }
+    omp_init_lock(&(w_lock[0]));
+    omp_init_lock(&(r_lock[0]));
+    omp_set_lock(&(r_lock[0]));
+    omp_init_lock(&(w_lock[1]));
+    omp_init_lock(&(r_lock[1]));
+    omp_set_lock(&(r_lock[1]));
+
 
     nfeeds = config.nfeeds;
     nchans = 2 * nfeeds;
@@ -390,6 +428,8 @@ void free_buf()
 {
     free(buf01);
     free(buf02);
+    free(bufeth);
+    free(bufeth_state);
     free(feedno);
     free(channo);
     free(blorder);
@@ -478,47 +518,64 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "/", "sitename", config.sitename);
     attr_id = H5Acreate2(file_id, "sitelat", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelat);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "sitelon", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.sitelon);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "siteelev", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.siteelev);
     H5LTset_attribute_string(file_id, "/", "timezone", config.timezone);
     H5LTset_attribute_string(file_id, "/", "epoch", config.epoch);
     // Type C: Antenna
     H5LTset_attribute_string(file_id, "/", "telescope", config.telescope);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "dishdiam", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.dishdiam);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "nants", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.nants);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "npols", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.npols);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "nfeeds", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfeeds);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "cylen", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cylen);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "cywid", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.cywid);
+    status = H5Aclose (attr_id);
     // Type D: Receiver
     H5LTset_attribute_string(file_id, "/", "recvver", config.recvver);
     attr_id = H5Acreate2(file_id, "lofreq", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.lofreq);
+    status = H5Aclose (attr_id);
     // Type E: Correlator
     H5LTset_attribute_string(file_id, "/", "corrver", config.corrver);
     attr_id = H5Acreate2(file_id, "samplingbits", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.samplingbits);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "corrmode", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.corrmode);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "inttime", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
-    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &accurate_inttime);
+    H5Awrite(attr_id, H5T_NATIVE_DOUBLE, &accurate_inttime);
+    status = H5Aclose (attr_id);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
     attr_id = H5Acreate2(file_id, "sec1970", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &sec1970);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "nfreq", H5T_STD_I32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.nfreq);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "freqstart", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstart);
+    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "freqstep", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.freqstep);
+    status = H5Aclose (attr_id);
 
     // vis
     // Create the compound datatype for memory.
@@ -549,6 +606,8 @@ void gen_datafile(const char *data_path)
     dset = H5Dcreate (file_id, "feedno", H5T_STD_I32LE, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, feedno);
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
     // Attributes for feedno
 
     // channo
@@ -561,6 +620,8 @@ void gen_datafile(const char *data_path)
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, channo);
     // Attributes for channo
     H5LTset_attribute_string(file_id, "channo", "dimname", "Feed No., (XPolarization YPolarization)");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
     // attribute badchn, how to?
 
     // blorder
@@ -573,6 +634,8 @@ void gen_datafile(const char *data_path)
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, blorder);
     // Attributes for blorder
     H5LTset_attribute_string(file_id, "blorder", "dimname", "Baselines, BaselineName");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // feedpos
     // Create dataspace
@@ -585,6 +648,8 @@ void gen_datafile(const char *data_path)
     // Attributes for feedpos
     H5LTset_attribute_string(file_id, "feedpos", "dimname", "Feed No., (X,Y,Z) coordinate");
     H5LTset_attribute_string(file_id, "feedpos", "unit", "meter");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // antpointing
     // Create dataspace
@@ -597,6 +662,8 @@ void gen_datafile(const char *data_path)
     // Attributes for antpointing
     H5LTset_attribute_string(file_id, "antpointing", "dimname", "Source No., Feed No., (Az, Alt, AzErr, AltErr)");
     H5LTset_attribute_string(file_id, "antpointing", "unit", "degree");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // pointingtime
     // Create dataspace
@@ -610,6 +677,8 @@ void gen_datafile(const char *data_path)
     // Attributes for antpointing
     H5LTset_attribute_string(file_id, "pointingtime", "dimname", "Source No., (starttime,endtime)");
     H5LTset_attribute_string(file_id, "pointingtime", "unit", "second");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // polerr
     // Create dataspace
@@ -622,6 +691,8 @@ void gen_datafile(const char *data_path)
     // Attributes for polerr
     H5LTset_attribute_string(file_id, "polerr", "dimname", "Feed No., (XPolErr, YPolErr)");
     H5LTset_attribute_string(file_id, "polerr", "unit", "degree");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // nspos
     // Create dataspace
@@ -634,6 +705,8 @@ void gen_datafile(const char *data_path)
     // Attributes for feedpos
     H5LTset_attribute_string(file_id, "nspos", "dimname", "NoiseSource No., (X,Y,Z) coordinate");
     H5LTset_attribute_string(file_id, "nspos", "unit", "meter");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // noisesource
     // Create dataspace
@@ -646,6 +719,8 @@ void gen_datafile(const char *data_path)
     // Attributes for noisesource
     H5LTset_attribute_string(file_id, "noisesource", "dimname", "NoiseSource No., (Start, Stop, Cycle)");
     H5LTset_attribute_string(file_id, "noisesource", "unit", "second");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // transitsource
     // Create dataspace
@@ -659,6 +734,8 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "transitsource", "dimname", "Source, (time, SourceRA, SourceDec, SourceAz, SourceAlt)");
     H5LTset_attribute_string(file_id, "transitsource", "unit", "(second, degree, degree, degree, degree)");
     H5LTset_attribute_string(file_id, "transitsource", "srcname", "None");
+    status = H5Sclose (space);
+    status = H5Dclose (dset);
 
     // weather
     // Create dataspace
@@ -674,11 +751,17 @@ void gen_datafile(const char *data_path)
     H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value.");
 
     // Close and release resources.
-    status = H5Pclose (attr_space);
-    status = H5Dclose (attr_id);
+    //status = H5Pclose (attr_space);
+    status = H5Sclose (attr_space);
+    //printf("attr_space close %d", status);
+    //status = H5Aclose (attr_id);
+    //printf("attr_id close %d", status);
     status = H5Pclose (dcpl);
-    status = H5Dclose (dset);
+    //printf("dcpl close %d", status);
+    //status = H5Dclose (dset);
+    //printf("dset close %d", status);
     status = H5Sclose (space);
+    //printf("space %d", status);
 
     file_count++;
 
@@ -699,6 +782,7 @@ void writeData(const char *data_path)
     {
         if( buf01_state == 1 )
         {
+            //printf("writing Buff01\n");
             offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
@@ -736,7 +820,7 @@ void writeData(const char *data_path)
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
-                status = H5Dclose (sub_dataspace_id);
+                status = H5Sclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
@@ -752,6 +836,7 @@ void writeData(const char *data_path)
         }
         else if( buf02_state == 1 )
         {
+            //printf("writing Buff02\n");
             offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
             sub_dataspace_id = H5Screate_simple (3, sub_dims, NULL);
@@ -789,7 +874,7 @@ void writeData(const char *data_path)
                 // Close and release resources.
                 status = H5Dclose (dataset_id);
                 status = H5Dclose (weather_dset);
-                status = H5Dclose (sub_dataspace_id);
+                status = H5Sclose (sub_dataspace_id);
                 status = H5Sclose (dataspace_id);
                 status = H5Tclose (memtype);
                 status = H5Tclose (filetype);
@@ -811,7 +896,7 @@ void writeData(const char *data_path)
             // Close and release resources.
             status = H5Dclose (dataset_id);
             status = H5Dclose (weather_dset);
-            status = H5Dclose (sub_dataspace_id);
+            status = H5Sclose (sub_dataspace_id);
             status = H5Sclose (dataspace_id);
             status = H5Tclose (memtype);
             status = H5Tclose (filetype);
@@ -822,11 +907,470 @@ void writeData(const char *data_path)
     }
 }
 
+void recvData()
+{
+    //char log_path[150];
+    register int packet_len ;
+    //register int row = 0;
+    register int init_cnt, bufeth_index=0;
+    //register int pkt_id_old=-1, current_cnt, freq_ind;
+    //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
+    //register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    //register long row_size = 8 * N_BASELINE;
+    register int pkt_id_old = 0;
+    //u_char frame_buff[BUFSIZE];
+    //u_char * frame_buff_p = frame_buff;
+    u_char * frame_buff_p = *bufeth;
+    //u_char * start_buf_p;
+    //u_char * start_frame_p;
+    //int copy_len;
+    int recv_fd;
+    int old_cnt, i = 0;
+    struct sockaddr_ll sll;
+    struct ifreq ifr;
+    //FILE *fp;
 
-void recvData(const char *data_path)
+    clock_t t1, t2;
+
+    // open log file
+    //strcpy(log_path, data_path);
+    //strcat(log_path, "/recv_data.log");
+    //fp = fopen(log_path, "wb");
+
+    // check if weather data file exits
+    getcwd(weather_file, sizeof(weather_file));
+    strcat(weather_file, "/");
+    strcat(weather_file, WEATHER_PATH);
+    if( access(weather_file, F_OK) == -1 )
+    {
+        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+    }
+    else
+    {
+        weather_exist = 1;
+
+        // set timer period
+        new_value.it_value.tv_sec = 0;
+        new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
+        new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
+        new_value.it_interval.tv_usec = 0;
+    }
+
+    // initialize network related things
+    recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    bzero(&sll, sizeof(sll));
+    bzero(&ifr, sizeof(ifr));
+    strncpy((char *)ifr.ifr_name, DEVICE_NAME, IFNAMSIZ);
+    ioctl(recv_fd, SIOCGIFINDEX, &ifr);
+    sll.sll_family   = AF_PACKET;
+    sll.sll_protocol = htons(ETH_P_ALL);
+    sll.sll_ifindex  = ifr.ifr_ifindex;
+    bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
+
+    printf("Begin to receive data ... \n");
+    fflush(stdout);
+
+    while (Running) // Find packet zero.
+    {
+        //packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
+        packet_len = recv(recv_fd, *bufeth, BUFSIZE, 0);
+        if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
+        {
+            if (i == 0)
+            {
+                old_cnt = *(int *)(frame_buff_p + 22);
+                i=1;
+            }
+            else
+            {
+                init_cnt = *(int *)(frame_buff_p + 22);
+                // find where time count changes as the starting point 
+                // to receive data to buffer
+                if (init_cnt != old_cnt)
+                {
+                    // use this time as the data receiving start time 
+                    // (may need more accurate start time, but how to get?)
+                    PyRun_SimpleString("start_timestamp = time.time()"); 
+                    // Seconds since epoch 1970 Jan. 1st
+                    pkt_id = 0;
+                    // now setup the timer and begin to get weather data
+                    if (weather_exist) // while weather data file exists
+                    {
+                        setitimer(ITIMER_REAL, &new_value, &old_value);
+                        // initialize timer count to 0
+                        timer_cnt = 0;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    omp_set_lock(&(w_lock[0]));
+    bufeth_state[0]=packet_len;
+    for (bufeth_index=1; bufeth_index<bufethsize/2; bufeth_index++)
+    {
+        //omp_set_lock(&(w_lock[bufeth_index]));
+        bufeth_state[bufeth_index] = 
+            recv(recv_fd, *(bufeth + bufeth_index), BUFSIZE, 0);
+        //omp_unset_lock(&(r_lock[bufeth_index]));
+    }
+    omp_unset_lock(&(r_lock[0]));
+    omp_set_lock(&(w_lock[1]));
+    for (bufeth_index=bufethsize/2; bufeth_index<bufethsize; bufeth_index++)
+    {
+        //omp_set_lock(&(w_lock[bufeth_index]));
+        bufeth_state[bufeth_index] = 
+            recv(recv_fd, *(bufeth + bufeth_index), BUFSIZE, 0);
+        //omp_unset_lock(&(r_lock[bufeth_index]));
+    }
+    omp_unset_lock(&(r_lock[1]));
+
+    while(Running)
+    {
+
+        omp_set_lock(&(w_lock[0]));
+        for (bufeth_index=0; bufeth_index<bufethsize/2; bufeth_index++)
+        {
+            //omp_set_lock(&(w_lock[bufeth_index]));
+            bufeth_state[bufeth_index] = 
+                recv(recv_fd, *(bufeth + bufeth_index), BUFSIZE, 0);
+            //omp_unset_lock(&(r_lock[bufeth_index]));
+        }
+        omp_unset_lock(&(r_lock[0]));
+
+        omp_set_lock(&(w_lock[1]));
+        for (bufeth_index=bufethsize/2; bufeth_index<bufethsize; bufeth_index++)
+        {
+            //omp_set_lock(&(w_lock[bufeth_index]));
+            bufeth_state[bufeth_index] = 
+                recv(recv_fd, *(bufeth + bufeth_index), BUFSIZE, 0);
+            //omp_unset_lock(&(r_lock[bufeth_index]));
+        }
+        printf("recv: pkt_id %d\t", *(int *)(*(bufeth + bufethsize/2 - 1) + 18));
+        printf("pkt_id %d\n", *(int *)(*(bufeth + bufethsize - 1) + 18));
+        omp_unset_lock(&(r_lock[1]));
+
+    }
+    bufeth_state[0] = -1; // set the 1st eth buff flag to -1, the check thread break
+    //for (i=0; i<bufethsize; i++)
+    //{
+    //    omp_unset_lock(&(r_lock[i]));
+    //    omp_destroy_lock(&(r_lock[i]));
+    //    omp_destroy_lock(&(w_lock[i]));
+    //}
+    omp_unset_lock(&(r_lock[0]));
+    omp_destroy_lock(&(r_lock[0]));
+    omp_destroy_lock(&(w_lock[0]));
+    omp_unset_lock(&(r_lock[1]));
+    omp_destroy_lock(&(r_lock[1]));
+    omp_destroy_lock(&(w_lock[1]));
+    //fclose(fp);
+}
+
+void checkData(const char *data_path)
+{
+    //sleep(40);
+    char log_path[150];
+    register int packet_len, row = 0;
+    register int init_cnt = -1, bufeth_index=0, pkt_id_old=-1;
+    register int current_cnt, freq_ind;
+    register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
+    register long row_size = 8 * N_BASELINE;
+    u_char * frame_buff_p;
+    u_char * start_buf_p;
+    u_char * start_frame_p;
+    int buf01_state_local = 0 ;
+    int buf02_state_local = 0 ;
+    int copy_len;
+    int lost_pkt_n = 0;
+    FILE *fp;
+
+    // open log file
+    strcpy(log_path, data_path);
+    strcat(log_path, "/recv_data.log");
+    fp = fopen(log_path, "wb");
+
+    while(bufeth_state[bufeth_index]==0)
+    {}
+    if (init_cnt == -1)
+    {
+        init_cnt = *(int *)(*(bufeth) + 22);
+    }
+
+    while(Running)
+    {
+        //while(bufeth_index<bufethsize)
+        if(bufeth_state[0]==-1)
+        {
+            // the recv thread already break, break here.
+            break;
+        }
+
+        omp_set_lock(&(r_lock[0]));
+        printf("check: pkt_id %d\t", *(int *)(*(bufeth + bufethsize/2 - 1) + 18));
+        printf("pkt_id %d\n\n", *(int *)(*(bufeth + bufethsize - 1) + 18));
+        for (bufeth_index=0; bufeth_index<bufethsize/2; bufeth_index++)
+        {
+            //omp_set_lock(&(r_lock[bufeth_index]));
+            //while(bufeth_state[bufeth_index]==0)
+            //{}
+            //printf("\nchecking %d package", bufeth_index);
+            frame_buff_p = *(bufeth + bufeth_index);
+            pkt_id = *(int *)(frame_buff_p  + 18);
+            packet_len = bufeth_state[bufeth_index];
+            //printf("checking %d pkt_id\t%d\n", bufeth_index, pkt_id);
+            if (pkt_id == 0)
+            {
+                current_cnt = *(int *)(frame_buff_p + 22);
+                freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                //printf("%d %d %d %d\n", row, row_in_buf, buf01_state, buf02_state);
+
+                if (row >= row_in_buf)
+                {
+                    //printf("switch buf %d %d\n", buf01_state, buf02_state);
+                    //fflush(stdout);
+                    if (buf01_state_local == 0)
+                    {
+                        buf01_state_local = 1;
+                        buf01_state       = 1;
+                        buf02_state_local = buf02_state;
+                    }
+                    else if (buf02_state_local == 0)
+                    {
+                        buf02_state_local = 1;
+                        buf02_state       = 1;
+                        buf01_state_local = buf01_state;
+                    }
+                    init_cnt = current_cnt;
+                    row = freq_ind;
+                }
+
+            }
+            else if (pkt_id != pkt_id_old + 1) // have packet lost
+            {
+                // drop packets until find packet 0
+                //printf("drop packets until find packet 0, %d\n", pkt_id);
+                //fflush(stdout);
+                pkt_id_old = 100;
+                lost_pkt_n ++;
+                bufeth_state[bufeth_index] = 0;
+                omp_unset_lock(&(w_lock[bufeth_index]));
+                continue;
+            }
+
+            //if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+            if (pkt_id_old == 100)
+            {
+                printf("Jump from %d to %d. %d packet lost\n", 
+                        pkt_id_old, pkt_id, lost_pkt_n);
+                fflush(stdout);
+                lost_pkt_n = 0;
+                //fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+            }
+            pkt_id_old = pkt_id;
+
+            if (buf01_state_local == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf01 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+            }
+            else if (buf02_state_local == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf02 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+            }
+            else
+            {
+                printf("Buf01 and Buf02 are both full.\n");
+                fflush(stdout);
+                Running = 0;
+            }
+            bufeth_state[bufeth_index] = 0;
+            //bufeth_index++;
+        }
+        omp_unset_lock(&(w_lock[0]));
+
+        omp_set_lock(&(r_lock[1]));
+        for (bufeth_index=bufethsize/2; bufeth_index<bufethsize; bufeth_index++)
+        {
+            //omp_set_lock(&(r_lock[bufeth_index]));
+            //while(bufeth_state[bufeth_index]==0)
+            //{}
+            //printf("\nchecking %d package", bufeth_index);
+            frame_buff_p = *(bufeth + bufeth_index);
+            pkt_id = *(int *)(frame_buff_p  + 18);
+            packet_len = bufeth_state[bufeth_index];
+            //printf("checking %d pkt_id\t%d\n", bufeth_index, pkt_id);
+            if (pkt_id == 0)
+            {
+                current_cnt = *(int *)(frame_buff_p + 22);
+                freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
+                row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
+                //printf("%d %d %d %d\n", row, row_in_buf, buf01_state, buf02_state);
+
+                if (row >= row_in_buf)
+                {
+                    //printf("switch buf %d %d\n", buf01_state, buf02_state);
+                    //fflush(stdout);
+                    if (buf01_state_local == 0)
+                    {
+                        buf01_state_local = 1;
+                        buf01_state       = 1;
+                        buf02_state_local = buf02_state;
+                    }
+                    else if (buf02_state_local == 0)
+                    {
+                        buf02_state_local = 1;
+                        buf02_state       = 1;
+                        buf01_state_local = buf01_state;
+                    }
+                    init_cnt = current_cnt;
+                    row = freq_ind;
+                }
+
+            }
+            else if (pkt_id != pkt_id_old + 1) // have packet lost
+            {
+                // drop packets until find packet 0
+                //printf("drop packets until find packet 0, %d\n", pkt_id);
+                //fflush(stdout);
+                pkt_id_old = 100;
+                lost_pkt_n ++;
+                bufeth_state[bufeth_index] = 0;
+                omp_unset_lock(&(w_lock[bufeth_index]));
+                continue;
+            }
+
+            //if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
+            if (pkt_id_old == 100)
+            {
+                printf("Jump from %d to %d. %d packet lost\n", 
+                        pkt_id_old, pkt_id, lost_pkt_n);
+                fflush(stdout);
+                lost_pkt_n = 0;
+                //fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
+            }
+            pkt_id_old = pkt_id;
+
+            if (buf01_state_local == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf01 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf01 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+            }
+            else if (buf02_state_local == 0)
+            {
+                if (pkt_id == 0)
+                {
+                    start_buf_p = buf02 + row*row_size;
+                    start_frame_p = frame_buff_p + 30;
+                    copy_len = packet_len - 30;
+                }
+                else if (pkt_id == 99)
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22 - 80;
+                }
+                else
+                {
+                    start_buf_p = buf02 + row*row_size 
+                        + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
+                    start_frame_p = frame_buff_p + 22;
+                    copy_len = packet_len - 22;
+                }
+
+                memcpy(start_buf_p, start_frame_p, copy_len);
+
+            }
+            else
+            {
+                printf("Buf01 and Buf02 are both full.\n");
+                fflush(stdout);
+                Running = 0;
+            }
+            bufeth_state[bufeth_index] = 0;
+            //bufeth_index++;
+        }
+        omp_unset_lock(&(w_lock[1]));
+        //bufeth_index = 0;
+    }
+    sleep(0.2);
+    DataExist = 0;
+
+    fclose(fp);
+}
+
+
+void recv_checkData(const char *data_path)
 {
     char log_path[150];
-    register int packet_len ;
+    register int packet_len;
     register int row = 0;
     register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
@@ -1271,12 +1815,15 @@ int main(int argc, char* argv[])
     /* allocate and initialize buffer */
     init_buf();
 
-    #pragma omp parallel num_threads(2) private(thread_id)
+    #pragma omp parallel num_threads(3) private(thread_id)
     {
         thread_id = omp_get_thread_num();
         if(thread_id == 0)
-            recvData(data_path);
+            //recvData(data_path);
+            recvData();
         else if(thread_id == 1)
+            checkData(data_path);
+        else if(thread_id == 2)
             writeData(data_path);
     }
 
