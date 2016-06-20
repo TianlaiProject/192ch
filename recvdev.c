@@ -148,7 +148,6 @@ int *bufeth_state;
 omp_lock_t w_lock[2];
 omp_lock_t r_lock[2];
 
-PyObject *pMain = NULL;
 PyObject *pMainDict = NULL;
 
 /////////////////////////////////////////////
@@ -239,13 +238,13 @@ void create_data_path(const char *data_path)
         if( mkdir(data_path, 0755) == -1 )
         {
             printf("Error: Failed to create the data path %s!!!\n", data_path);
-            exit(-1);
+            exit(1);
         }
     }
     else if( access(data_path, W_OK) == -1 )
     {
         printf("Error: Data path %s does not writable!!!\n", data_path);
-        exit(-1);
+        exit(1);
     }
 }
 
@@ -297,7 +296,7 @@ void init_buf()
     if (nbls != N_BASELINE)
     {
         printf("Error: Number of baselines %d unequal to N_BASELINE!!!\n", nbls);
-        exit(-1);
+        exit(1);
     }
 
     // get data dir
@@ -327,7 +326,7 @@ void init_buf()
     if (data_file == NULL)
     {
         printf("Error: Fail to open file %s\n", blorder_dir);
-        exit (-1);
+        exit (1);
     }
     for (i=0; i<2*nbls; i++)
     {
@@ -343,7 +342,7 @@ void init_buf()
     if (data_file == NULL)
     {
         printf("Error: Fail to open file %s\n", feedpos_dir);
-        exit (-1);
+        exit (1);
     }
     for (i=0; i<3*nfeeds; i++)
     {
@@ -385,7 +384,7 @@ void init_buf()
     if (data_file == NULL)
     {
         printf("Error: Fail to open file %s\n", nspos_dir);
-        exit (-1);
+        exit (1);
     }
     for (i=0; i<3*nns; i++)
     {
@@ -457,7 +456,7 @@ void gen_datafile(const char *data_path)
     char tmp_str[150];
     char file_name[35];
     char file_path[150];
-    // PyObject *pObj = NULL;
+    PyObject *pObj = NULL;
     hsize_t attr_dims[] = {};
     hid_t attr_space, attr_id;
     hid_t space, dset, dcpl; /* Handles */
@@ -482,12 +481,20 @@ void gen_datafile(const char *data_path)
     PyRun_SimpleString(tmp_str);
     PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
     // get value from python, better to have error checking
-    obs_time = PyString_AsString(PyMapping_GetItemString(pMainDict, "obs_time"));
-    sec1970 = start_offset + (float) PyFloat_AsDouble(PyMapping_GetItemString(pMainDict, "start_timestamp")); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
+    pObj = PyMapping_GetItemString(pMainDict, "obs_time");
+    obs_time = PyString_AsString(pObj);
+    Py_DECREF(pObj);
+    pObj = PyMapping_GetItemString(pMainDict, "start_timestamp");
+    sec1970 = start_offset + (float) PyFloat_AsDouble(pObj); // Seconds since epoch 1970 Jan. 1st; Equals “obstime”
+    Py_DECREF(pObj);
     PyRun_SimpleString("stime = '%04d%02d%02d%02d%02d%02d' % (stime.year, stime.month, stime.day, stime.hour, stime.minute, stime.second)");
-    stime = PyString_AsString(PyMapping_GetItemString(pMainDict, "stime"));
+    pObj = PyMapping_GetItemString(pMainDict, "stime");
+    stime = PyString_AsString(pObj);
+    Py_DECREF(pObj);
     PyRun_SimpleString("etime = '%04d%02d%02d%02d%02d%02d' % (etime.year, etime.month, etime.day, etime.hour, etime.minute, etime.second)");
-    etime = PyString_AsString(PyMapping_GetItemString(pMainDict, "etime"));
+    pObj = PyMapping_GetItemString(pMainDict, "etime");
+    etime = PyString_AsString(pObj);
+    Py_DECREF(pObj);
 
     // generate the observation log if required
     if (agmts.gen_obslog && file_count == 0)
@@ -917,7 +924,7 @@ void recvData()
     //register int init_cnt, current_cnt, freq_ind, pkt_id = -1, pkt_id_old=-1;
     //register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
     //register long row_size = 8 * N_BASELINE;
-    register int pkt_id_old = 0;
+    // register int pkt_id_old = 0;
     //u_char frame_buff[BUFSIZE];
     //u_char * frame_buff_p = frame_buff;
     u_char * frame_buff_p = *bufeth;
@@ -930,7 +937,7 @@ void recvData()
     struct ifreq ifr;
     //FILE *fp;
 
-    clock_t t1, t2;
+    // clock_t t1, t2;
 
     // open log file
     //strcpy(log_path, data_path);
@@ -1754,10 +1761,24 @@ static int handler(void* config, const char* section, const char* name,
 
 int main(int argc, char* argv[])
 {
+    PyObject *pMain = NULL;
+
     Py_Initialize(); //initialize python
-    PySys_SetArgv(argc, argv);
+    // PySys_SetArgv(argc, argv);
     pMain = PyImport_AddModule("__main__");
+    if (pMain == NULL)
+    {
+        printf("%s\n", "Error: Can not add module __main__");
+        exit(1);
+    }
     pMainDict = PyModule_GetDict(pMain);
+    Py_DECREF(pMain);
+    if (pMainDict == NULL)
+    {
+        printf("%s\n", "Error: Can not get the dict of module __main__");
+        exit(1);
+    }
+
     PyRun_SimpleString("import time");
     PyRun_SimpleString("import datetime");
 
@@ -1802,7 +1823,7 @@ int main(int argc, char* argv[])
     config_file = agmts.args[1];
     if (ini_parse(config_file, handler, &config) < 0) {
         printf("Error: Can't load configuration file '%s'\n", config_file);
-        return 1;
+        exit(1);
     }
     if (agmts.verbose) {
         printf("Configure parameters loaded from '%s'\n", config_file);
@@ -1833,6 +1854,7 @@ int main(int argc, char* argv[])
     printf("Over.\n");
     fflush(stdout);
 
+    Py_DECREF(pMainDict);
     Py_Finalize();
     return 0;
 }
