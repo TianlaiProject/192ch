@@ -466,8 +466,6 @@ void gen_datafile(const char *data_path)
     start_offset = file_count * span; // offset from start time for this file, second
     end_offset = (file_count + 1) * span - accurate_inttime; // offset from start time for this file, second
 
-    // if (file_count == 0)
-    //     PyRun_SimpleString("start_timestamp = time.time()");
     // wait until start_time has been set, that is we have began to receive data
     while (pkt_id == -1)
         ;
@@ -479,7 +477,7 @@ void gen_datafile(const char *data_path)
     PyRun_SimpleString(tmp_str);
     snprintf(tmp_str, sizeof(tmp_str), "etime = start_time + datetime.timedelta(seconds=%f)", end_offset);
     PyRun_SimpleString(tmp_str);
-    PyRun_SimpleString("obs_time = str(stime)"); // in format like 2016-05-14 17:04:53.014335
+    PyRun_SimpleString("obs_time = str(stime).replace('-', '/')"); // in format like 2016/05/14 17:04:53.014335
     // get value from python, better to have error checking
     pObj = PyMapping_GetItemString(pMainDict, "obs_time");
     obs_time = PyString_AsString(pObj);
@@ -626,7 +624,7 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, channo);
     // Attributes for channo
-    H5LTset_attribute_string(file_id, "channo", "dimname", "Feed No., (XPolarization YPolarization)");
+    H5LTset_attribute_string(file_id, "channo", "dimname", "Feed No., (Channel No. of XPol, Channel No. of YPol)");
     status = H5Sclose (space);
     status = H5Dclose (dset);
     // attribute badchn, how to?
@@ -640,7 +638,7 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, blorder);
     // Attributes for blorder
-    H5LTset_attribute_string(file_id, "blorder", "dimname", "Baselines, BaselineName");
+    H5LTset_attribute_string(file_id, "blorder", "dimname", "Baselines, Baseline Name");
     status = H5Sclose (space);
     status = H5Dclose (dset);
 
@@ -653,7 +651,7 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, feedpos);
     // Attributes for feedpos
-    H5LTset_attribute_string(file_id, "feedpos", "dimname", "Feed No., (X,Y,Z) coordinate");
+    H5LTset_attribute_string(file_id, "feedpos", "dimname", "Feed No., (X, Y, Z) coordinate");
     H5LTset_attribute_string(file_id, "feedpos", "unit", "meter");
     status = H5Sclose (space);
     status = H5Dclose (dset);
@@ -682,7 +680,7 @@ void gen_datafile(const char *data_path)
     pointingtime[0] = sec1970; // fill the correct start time here before saving
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, pointingtime);
     // Attributes for antpointing
-    H5LTset_attribute_string(file_id, "pointingtime", "dimname", "Source No., (starttime,endtime)");
+    H5LTset_attribute_string(file_id, "pointingtime", "dimname", "Source No., (starttime, endtime)");
     H5LTset_attribute_string(file_id, "pointingtime", "unit", "second");
     status = H5Sclose (space);
     status = H5Dclose (dset);
@@ -710,7 +708,7 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, nspos);
     // Attributes for feedpos
-    H5LTset_attribute_string(file_id, "nspos", "dimname", "NoiseSource No., (X,Y,Z) coordinate");
+    H5LTset_attribute_string(file_id, "nspos", "dimname", "NoiseSource No., (X, Y, Z) coordinate");
     H5LTset_attribute_string(file_id, "nspos", "unit", "meter");
     status = H5Sclose (space);
     status = H5Dclose (dset);
@@ -738,7 +736,7 @@ void gen_datafile(const char *data_path)
     // Write the data to the dataset
     status = H5Dwrite (dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, transitsource);
     // Attributes for feedpos
-    H5LTset_attribute_string(file_id, "transitsource", "dimname", "Source, (time, SourceRA, SourceDec, SourceAz, SourceAlt)");
+    H5LTset_attribute_string(file_id, "transitsource", "dimname", "Sources, (time, SourceRA, SourceDec, SourceAz, SourceAlt)");
     H5LTset_attribute_string(file_id, "transitsource", "unit", "(second, degree, degree, degree, degree)");
     H5LTset_attribute_string(file_id, "transitsource", "srcname", "None");
     status = H5Sclose (space);
@@ -755,7 +753,8 @@ void gen_datafile(const char *data_path)
     status = H5Dwrite (weather_dset, H5T_IEEE_F32LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, weather);
     // Attributes for weather
     H5LTset_attribute_string(file_id, "weather", "dimname", "Weather Data, (Sec1970, RoomTemperature, RoomHumidity, Temperature, Dewpoint, Humidity, Precipitation, WindDirection, WindSpeed, Pressure)");
-    H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value.");
+    /* H5LTset_attribute_string(file_id, "weather", "unit", "second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa; Note: WindSpeed is a 2-minute-average value."); */
+    H5LTset_attribute_string(file_id, "weather", "unit", "(second, Celcius, %, Celcius, Celcius, %, millimeter, degree (0 to 360; 0 for North, 90 for East), m/s, Pa)");
 
     // Close and release resources.
     //status = H5Pclose (attr_space);
@@ -917,6 +916,7 @@ void writeData(const char *data_path)
 void recvData()
 {
     //char log_path[150];
+    char tmp_str[150];
     register int packet_len ;
     //register int row = 0;
     register int init_cnt, bufeth_index=0;
@@ -997,7 +997,8 @@ void recvData()
                 {
                     // use this time as the data receiving start time 
                     // (may need more accurate start time, but how to get?)
-                    PyRun_SimpleString("start_timestamp = time.time()"); 
+                    snprintf(tmp_str, sizeof(tmp_str), "start_timestamp = time.time() - %f", 0.5*accurate_inttime); // minus half integration time
+                    PyRun_SimpleString(tmp_str);
                     // Seconds since epoch 1970 Jan. 1st
                     pkt_id = 0;
                     // now setup the timer and begin to get weather data
@@ -1374,248 +1375,248 @@ void checkData(const char *data_path)
 }
 
 
-void recv_checkData(const char *data_path)
-{
-    char log_path[150];
-    register int packet_len;
-    register int row = 0;
-    register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1;
-    register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME;
-    register long row_size = 8 * N_BASELINE;
-    u_char frame_buff[BUFSIZE];
-    u_char * frame_buff_p = frame_buff;
-    u_char * start_buf_p;
-    u_char * start_frame_p;
-    int copy_len;
-    int recv_fd;
-    int old_cnt, i = 0;
-    struct sockaddr_ll sll;
-    struct ifreq ifr;
-    FILE *fp;
+/* void recv_checkData(const char *data_path) */
+/* { */
+/*     char log_path[150]; */
+/*     register int packet_len; */
+/*     register int row = 0; */
+/*     register int init_cnt, current_cnt, freq_ind, pkt_id_old=-1; */
+/*     register int row_in_buf = N_FREQUENCY * N_INTEGRA_TIME; */
+/*     register long row_size = 8 * N_BASELINE; */
+/*     u_char frame_buff[BUFSIZE]; */
+/*     u_char * frame_buff_p = frame_buff; */
+/*     u_char * start_buf_p; */
+/*     u_char * start_frame_p; */
+/*     int copy_len; */
+/*     int recv_fd; */
+/*     int old_cnt, i = 0; */
+/*     struct sockaddr_ll sll; */
+/*     struct ifreq ifr; */
+/*     FILE *fp; */
 
-    // open log file
-    strcpy(log_path, data_path);
-    strcat(log_path, "/recv_data.log");
-    fp = fopen(log_path, "wb");
+/*     // open log file */
+/*     strcpy(log_path, data_path); */
+/*     strcat(log_path, "/recv_data.log"); */
+/*     fp = fopen(log_path, "wb"); */
 
-    // check if weather data file exits
-    getcwd(weather_file, sizeof(weather_file));
-    strcat(weather_file, "/");
-    strcat(weather_file, WEATHER_PATH);
-    if( access(weather_file, F_OK) == -1 )
-    {
-        printf("Error: Weather data file %s does not exist, so weather data will not get\n", weather_file);
-    }
-    else
-    {
-        weather_exist = 1;
+/*     // check if weather data file exits */
+/*     getcwd(weather_file, sizeof(weather_file)); */
+/*     strcat(weather_file, "/"); */
+/*     strcat(weather_file, WEATHER_PATH); */
+/*     if( access(weather_file, F_OK) == -1 ) */
+/*     { */
+/*         printf("Error: Weather data file %s does not exist, so weather data will not get\n", weather_file); */
+/*     } */
+/*     else */
+/*     { */
+/*         weather_exist = 1; */
 
-        // set timer period
-        new_value.it_value.tv_sec = 0;
-        new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer
-        new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time
-        new_value.it_interval.tv_usec = 0;
-    }
+/*         // set timer period */
+/*         new_value.it_value.tv_sec = 0; */
+/*         new_value.it_value.tv_usec = 1; // first setup after 1 micro second after timer */
+/*         new_value.it_interval.tv_sec = config.weatherperiod; // then after this time period each time */
+/*         new_value.it_interval.tv_usec = 0; */
+/*     } */
 
-    // initialize network related things
-    recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    bzero(&sll, sizeof(sll));
-    bzero(&ifr, sizeof(ifr));
-    strncpy((char *)ifr.ifr_name, DEVICE_NAME, IFNAMSIZ);
-    ioctl(recv_fd, SIOCGIFINDEX, &ifr);
-    sll.sll_family   = AF_PACKET;
-    sll.sll_protocol = htons(ETH_P_ALL);
-    sll.sll_ifindex  = ifr.ifr_ifindex;
-    bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll));
+/*     // initialize network related things */
+/*     recv_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL)); */
+/*     bzero(&sll, sizeof(sll)); */
+/*     bzero(&ifr, sizeof(ifr)); */
+/*     strncpy((char *)ifr.ifr_name, DEVICE_NAME, IFNAMSIZ); */
+/*     ioctl(recv_fd, SIOCGIFINDEX, &ifr); */
+/*     sll.sll_family   = AF_PACKET; */
+/*     sll.sll_protocol = htons(ETH_P_ALL); */
+/*     sll.sll_ifindex  = ifr.ifr_ifindex; */
+/*     bind(recv_fd, (struct sockaddr *) &sll, sizeof(sll)); */
 
-    printf("Begin to receive data ... \n");
-    fflush(stdout);
+/*     printf("Begin to receive data ... \n"); */
+/*     fflush(stdout); */
 
-    while (Running) // Find packet zero.
-    {
-        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
-        //        if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-        if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0.
-        {
-            if (i == 0)
-            {
-                old_cnt = *(int *)(frame_buff_p + 22);
-                i=1;
-            }
-            else
-            {
-                init_cnt = *(int *)(frame_buff_p + 22);
-                // find where time count changes as the starting point to receive data to buffer
-                if (init_cnt != old_cnt)
-                {
+/*     while (Running) // Find packet zero. */
+/*     { */
+/*         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0); */
+/*         //        if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE) */
+/*         if (*(int *)(frame_buff_p + 18) == 0) //find pkt 0. */
+/*         { */
+/*             if (i == 0) */
+/*             { */
+/*                 old_cnt = *(int *)(frame_buff_p + 22); */
+/*                 i=1; */
+/*             } */
+/*             else */
+/*             { */
+/*                 init_cnt = *(int *)(frame_buff_p + 22); */
+/*                 // find where time count changes as the starting point to receive data to buffer */
+/*                 if (init_cnt != old_cnt) */
+/*                 { */
 
-                    // use this time as the data receiving start time (may need more accurate start time, but how to get?)
-                    PyRun_SimpleString("start_timestamp = time.time()"); // Seconds since epoch 1970 Jan. 1st
-                    pkt_id = 0;
+/*                     // use this time as the data receiving start time (may need more accurate start time, but how to get?) */
+/*                     PyRun_SimpleString("start_timestamp = time.time()"); // Seconds since epoch 1970 Jan. 1st */
+/*                     pkt_id = 0; */
 
-                    // now setup the timer and begin to get weather data
-                    if (weather_exist) // while weather data file exists
-                    {
-                        setitimer(ITIMER_REAL, &new_value, &old_value);
-                        // initialize timer count to 0
-                        timer_cnt = 0;
-                    }
+/*                     // now setup the timer and begin to get weather data */
+/*                     if (weather_exist) // while weather data file exists */
+/*                     { */
+/*                         setitimer(ITIMER_REAL, &new_value, &old_value); */
+/*                         // initialize timer count to 0 */
+/*                         timer_cnt = 0; */
+/*                     } */
 
-                    break;
-                }
-            }
-        }
-    }
+/*                     break; */
+/*                 } */
+/*             } */
+/*         } */
+/*     } */
 
-    while(Running)
-    {
-        row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-        if (buf01_state == 0)
-        {
-            while (row < row_in_buf)
-            {
-                if (pkt_id == 0)
-                {
-                    start_buf_p = buf01 + row*row_size;
-                    start_frame_p = frame_buff_p + 30;
-                    copy_len = packet_len - 30;
-                }
-                else if (pkt_id == 99)
-                {
-                    start_buf_p = buf01 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
-                    start_frame_p = frame_buff_p + 22;
-                    copy_len = packet_len - 22 - 80;
-                }
-                else
-                {
-                    start_buf_p = buf01 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
-                    start_frame_p = frame_buff_p + 22;
-                    copy_len = packet_len - 22;
-                }
+/*     while(Running) */
+/*     { */
+/*         row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET; */
+/*         if (buf01_state == 0) */
+/*         { */
+/*             while (row < row_in_buf) */
+/*             { */
+/*                 if (pkt_id == 0) */
+/*                 { */
+/*                     start_buf_p = buf01 + row*row_size; */
+/*                     start_frame_p = frame_buff_p + 30; */
+/*                     copy_len = packet_len - 30; */
+/*                 } */
+/*                 else if (pkt_id == 99) */
+/*                 { */
+/*                     start_buf_p = buf01 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE; */
+/*                     start_frame_p = frame_buff_p + 22; */
+/*                     copy_len = packet_len - 22 - 80; */
+/*                 } */
+/*                 else */
+/*                 { */
+/*                     start_buf_p = buf01 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE; */
+/*                     start_frame_p = frame_buff_p + 22; */
+/*                     copy_len = packet_len - 22; */
+/*                 } */
 
-                memcpy(start_buf_p, start_frame_p, copy_len);
-                //                while (1)
-                //                {
-                packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
-                //                    if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-                //                    {
-                //                      pkt_id = (int)frame_buff[18];
-                //                      if (pkt_id < pkt_id_old) row++;
-                pkt_id = *(int *)(frame_buff_p + 18);
-                if (pkt_id == 0)
-                {
-                    current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    // printf("%d ", row);
-                }
-                else if (pkt_id < pkt_id_old) // have packet lost
-                {
-                    // drop packets until find packet 0
-                    while(1)
-                    {
-                        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
-                        pkt_id = *(int *)(frame_buff_p + 18);
-                        if (pkt_id == 0)
-                        {
-                            current_cnt = *(int *)(frame_buff_p + 22);
-                            freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-                            row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                            // printf("%d ", row);
-                            break;
-                        }
-                    }
-                }
+/*                 memcpy(start_buf_p, start_frame_p, copy_len); */
+/*                 //                while (1) */
+/*                 //                { */
+/*                 packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0); */
+/*                 //                    if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE) */
+/*                 //                    { */
+/*                 //                      pkt_id = (int)frame_buff[18]; */
+/*                 //                      if (pkt_id < pkt_id_old) row++; */
+/*                 pkt_id = *(int *)(frame_buff_p + 18); */
+/*                 if (pkt_id == 0) */
+/*                 { */
+/*                     current_cnt = *(int *)(frame_buff_p + 22); */
+/*                     freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET; */
+/*                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind; */
+/*                     // printf("%d ", row); */
+/*                 } */
+/*                 else if (pkt_id < pkt_id_old) // have packet lost */
+/*                 { */
+/*                     // drop packets until find packet 0 */
+/*                     while(1) */
+/*                     { */
+/*                         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0); */
+/*                         pkt_id = *(int *)(frame_buff_p + 18); */
+/*                         if (pkt_id == 0) */
+/*                         { */
+/*                             current_cnt = *(int *)(frame_buff_p + 22); */
+/*                             freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET; */
+/*                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind; */
+/*                             // printf("%d ", row); */
+/*                             break; */
+/*                         } */
+/*                     } */
+/*                 } */
 
-                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
-                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
-                pkt_id_old = pkt_id;
-                //                        break;
-                //                    }
-                //                }
-            }
-            buf01_state = 1;
-            init_cnt = current_cnt;
-        }
-        else if (buf02_state == 0)
-        {
-            while (row < row_in_buf)
-            {
-                if (pkt_id == 0)
-                {
-                    start_buf_p = buf02 + row*row_size;
-                    start_frame_p = frame_buff_p + 30;
-                    copy_len = packet_len - 30;
-                }
-                else if (pkt_id == 99)
-                {
-                    start_buf_p = buf02 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
-                    start_frame_p = frame_buff_p + 22;
-                    copy_len = packet_len - 22 - 80;
-                }
-                else
-                {
-                    start_buf_p = buf02 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE;
-                    start_frame_p = frame_buff_p + 22;
-                    copy_len = packet_len - 22;
-                }
+/*                 if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1) */
+/*                     fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id); */
+/*                 pkt_id_old = pkt_id; */
+/*                 //                        break; */
+/*                 //                    } */
+/*                 //                } */
+/*             } */
+/*             buf01_state = 1; */
+/*             init_cnt = current_cnt; */
+/*         } */
+/*         else if (buf02_state == 0) */
+/*         { */
+/*             while (row < row_in_buf) */
+/*             { */
+/*                 if (pkt_id == 0) */
+/*                 { */
+/*                     start_buf_p = buf02 + row*row_size; */
+/*                     start_frame_p = frame_buff_p + 30; */
+/*                     copy_len = packet_len - 30; */
+/*                 } */
+/*                 else if (pkt_id == 99) */
+/*                 { */
+/*                     start_buf_p = buf02 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE; */
+/*                     start_frame_p = frame_buff_p + 22; */
+/*                     copy_len = packet_len - 22 - 80; */
+/*                 } */
+/*                 else */
+/*                 { */
+/*                     start_buf_p = buf02 + row*row_size + FIRST_PACKET_SIZE + (pkt_id - 1)*MAX_PACKET_SIZE; */
+/*                     start_frame_p = frame_buff_p + 22; */
+/*                     copy_len = packet_len - 22; */
+/*                 } */
 
-                memcpy(start_buf_p, start_frame_p, copy_len);
-                //                while (1)
-                //                {
-                packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
-                //                    if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE)
-                //                    {
-                //                      pkt_id = (int)frame_buff[18];
-                //                      if (pkt_id < pkt_id_old) row++;
-                pkt_id = *(int *)(frame_buff_p + 18);
-                if (pkt_id == 0)
-                {
-                    current_cnt = *(int *)(frame_buff_p + 22);
-                    freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-                    row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                    // printf("%d ", row);
-                }
-                else if (pkt_id < pkt_id_old) // have packet lost
-                {
-                    // drop packets until find packet 0
-                    while(1)
-                    {
-                        packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0);
-                        pkt_id = *(int *)(frame_buff_p + 18);
-                        if (pkt_id == 0)
-                        {
-                            current_cnt = *(int *)(frame_buff_p + 22);
-                            freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
-                            row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind;
-                            // printf("%d ", row);
-                            break;
-                        }
-                    }
-                }
+/*                 memcpy(start_buf_p, start_frame_p, copy_len); */
+/*                 //                while (1) */
+/*                 //                { */
+/*                 packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0); */
+/*                 //                    if (packet_len == MAX_RAWPACKET_SIZE || packet_len == MIN_RAWPACKET_SIZE) */
+/*                 //                    { */
+/*                 //                      pkt_id = (int)frame_buff[18]; */
+/*                 //                      if (pkt_id < pkt_id_old) row++; */
+/*                 pkt_id = *(int *)(frame_buff_p + 18); */
+/*                 if (pkt_id == 0) */
+/*                 { */
+/*                     current_cnt = *(int *)(frame_buff_p + 22); */
+/*                     freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET; */
+/*                     row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind; */
+/*                     // printf("%d ", row); */
+/*                 } */
+/*                 else if (pkt_id < pkt_id_old) // have packet lost */
+/*                 { */
+/*                     // drop packets until find packet 0 */
+/*                     while(1) */
+/*                     { */
+/*                         packet_len = recv(recv_fd, frame_buff, BUFSIZE, 0); */
+/*                         pkt_id = *(int *)(frame_buff_p + 18); */
+/*                         if (pkt_id == 0) */
+/*                         { */
+/*                             current_cnt = *(int *)(frame_buff_p + 22); */
+/*                             freq_ind = *(int *)(frame_buff_p + 26) + FREQ_OFFSET; */
+/*                             row = N_FREQUENCY*(current_cnt - init_cnt) + freq_ind; */
+/*                             // printf("%d ", row); */
+/*                             break; */
+/*                         } */
+/*                     } */
+/*                 } */
 
-                if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1)
-                    fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id);
-                pkt_id_old = pkt_id;
-                //                        break;
-                //                    }
-                //                }
-            }
-            buf02_state = 1;
-            init_cnt = current_cnt;
-        }
-        else
-        {
-            printf("Buf01 and Buf02 are both full.\n");
-            fflush(stdout);
-            Running = 0;
-        }
-    }
-    sleep(0.2);
-    DataExist = 0;
+/*                 if (((pkt_id + MAX_PACKET_ID - pkt_id_old) % MAX_PACKET_ID) != 1) */
+/*                     fprintf(fp, "Jump from %d to %d.\n", pkt_id_old, pkt_id); */
+/*                 pkt_id_old = pkt_id; */
+/*                 //                        break; */
+/*                 //                    } */
+/*                 //                } */
+/*             } */
+/*             buf02_state = 1; */
+/*             init_cnt = current_cnt; */
+/*         } */
+/*         else */
+/*         { */
+/*             printf("Buf01 and Buf02 are both full.\n"); */
+/*             fflush(stdout); */
+/*             Running = 0; */
+/*         } */
+/*     } */
+/*     sleep(0.2); */
+/*     DataExist = 0; */
 
-    fclose(fp);
-}
+/*     fclose(fp); */
+/* } */
 
 
 const char *argp_program_version =
