@@ -529,11 +529,11 @@ void gen_datafile(const char *data_path)
     status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "siteelev", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.siteelev);
+    status = H5Aclose (attr_id);
     H5LTset_attribute_string(file_id, "/", "timezone", config.timezone);
     H5LTset_attribute_string(file_id, "/", "epoch", config.epoch);
     // Type C: Antenna
     H5LTset_attribute_string(file_id, "/", "telescope", config.telescope);
-    status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "dishdiam", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
     H5Awrite(attr_id, H5T_NATIVE_FLOAT, &config.dishdiam);
     status = H5Aclose (attr_id);
@@ -566,7 +566,7 @@ void gen_datafile(const char *data_path)
     H5Awrite(attr_id, H5T_NATIVE_INT, &config.corrmode);
     status = H5Aclose (attr_id);
     attr_id = H5Acreate2(file_id, "inttime", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
-    H5Awrite(attr_id, H5T_NATIVE_DOUBLE, &accurate_inttime);
+    H5Awrite(attr_id, H5T_NATIVE_FLOAT, &accurate_inttime);
     status = H5Aclose (attr_id);
     H5LTset_attribute_string(file_id, "/", "obstime", obs_time);
     attr_id = H5Acreate2(file_id, "sec1970", H5T_IEEE_F32LE, attr_space,  H5P_DEFAULT, H5P_DEFAULT);
@@ -950,7 +950,7 @@ void recvData()
     strcat(weather_file, WEATHER_PATH);
     if( access(weather_file, F_OK) == -1 )
     {
-        printf("Error: Weather data file %s does not exist, so weather data will not get", weather_file);
+        printf("Error: Weather data file %s does not exist, so weather data will not get\n", weather_file);
     }
     else
     {
@@ -1773,7 +1773,7 @@ int main(int argc, char* argv[])
         exit(1);
     }
     pMainDict = PyModule_GetDict(pMain);
-    Py_DECREF(pMain);
+    /* Py_DECREF(pMain); */ // can not have this, otherwise ImportError: __import__ not found, also core dumped
     if (pMainDict == NULL)
     {
         printf("%s\n", "Error: Can not get the dict of module __main__");
