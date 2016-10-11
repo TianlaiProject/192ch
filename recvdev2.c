@@ -799,7 +799,8 @@ void writeData(const char *data_path)
             }
 
         }
-        else if( buf02_state == 1 )
+
+        if( buf02_state == 1 )
         {
             offset[0] = buf_cnt*N_INTEGRA_TIME;
             // Create memory space with size of subset.
@@ -852,6 +853,7 @@ void writeData(const char *data_path)
             }
 
         }
+
         if (buf01_state == 0 && buf02_state == 0 && DataExist == 0)
         {
             // Write weather data to the dataset before file close
@@ -939,7 +941,7 @@ void recvData(const char *data_path)
             if (i == 0)
             {
                 old_cnt = *(int *)(frame_buff_p + 22);
-                i=1;
+                i = 1;
             }
             else
             {
@@ -970,9 +972,10 @@ void recvData(const char *data_path)
 
     while(Running)
     {
-        row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
         if (buf01_state == 0)
         {
+            // the initial row when begin to write an empty bufffer
+            row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
             while (row < row_in_buf)
             {
                 if (pkt_id == 0)
@@ -1038,8 +1041,11 @@ void recvData(const char *data_path)
             buf01_state = 1;
             init_cnt = current_cnt;
         }
-        else if (buf02_state == 0)
+
+        if (buf02_state == 0)
         {
+            // the initial row when begin to write an empty bufffer
+            row = *(int *)(frame_buff_p + 26) + FREQ_OFFSET;
             while (row < row_in_buf)
             {
                 if (pkt_id == 0)
@@ -1105,7 +1111,8 @@ void recvData(const char *data_path)
             buf02_state = 1;
             init_cnt = current_cnt;
         }
-        else
+
+        if  (buf01_state == 1 && buf02_state == 1)
         {
             printf("Buf01 and Buf02 are both full.\n");
             fflush(stdout);
