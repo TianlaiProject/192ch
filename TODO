@@ -7,4 +7,7 @@
 - save badchn attribute, but how to?
 - check weather data update
 - pointing endtime, how to?
+
+- Load observer's email from cyl_config.ini
+- Add "_partN" to the end of the observation directory in new disks.
 - ...

@@ -4,7 +4,7 @@ PID=$(pgrep recvPacket)
 kill -USR1 $PID
 
 echo ""
-t=48
+t=40
 while [ $( pgrep recvPacket ) ]
 do
   printf "\rNow Exiting!!! Please wait < %2d seconds." $t
